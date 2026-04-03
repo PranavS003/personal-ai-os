@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register | Personal AI OS</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="page-fade">
+    <div class="page-shell auth-shell">
+        <div class="ambient ambient-one"></div>
+        <div class="ambient ambient-two"></div>
+
+        <main class="auth-page">
+            <section class="auth-card">
+                <div class="auth-copy">
+                    <p class="eyebrow">Personal AI OS</p>
+                    <h1>Create your account</h1>
+                    <p class="hero-text">Set up your login to access the dashboard</p>
+                </div>
+
+                <form method="post" action="{{ url_for('register') }}" class="daily-setup-form">
+                    <div class="setup-group">
+                        <label for="username">Username</label>
+                        <input type="text" id="username" name="username" placeholder="Choose a username" autocomplete="username" value="{{ form_data.username }}" required>
+                    </div>
+
+                    <div class="setup-group">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" name="email" placeholder="Enter your email" autocomplete="email" value="{{ form_data.email }}" required>
+                    </div>
+
+                    <div class="setup-group">
+                        <label for="password">Password</label>
+                        <input type="password" id="password" name="password" placeholder="Create a password" autocomplete="new-password" required>
+                        <p class="auth-hint">Use at least 6 characters.</p>
+                    </div>
+
+                    {% if error %}
+                        <p class="setup-feedback error">{{ error }}</p>
+                    {% endif %}
+
+                    <button type="submit" class="start-day-button">Create Account</button>
+                    <p class="auth-hint">Already have an account? <a href="{{ url_for('login') }}">Login</a></p>
+                </form>
+            </section>
+        </main>
+    </div>
+</body>
+</html>

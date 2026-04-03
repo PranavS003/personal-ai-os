@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Personal AI OS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="page-fade ai-os-page">
+    <div class="page-shell">
+        <div class="ambient ambient-one"></div>
+        <div class="ambient ambient-two"></div>
+        <div class="ambient ambient-three"></div>
+
+        <main class="app ai-os-layout dashboard-container">
+            <section class="workspace-pane left-section">
+                <header class="panel workspace-topbar">
+                    <div class="workspace-copy">
+                        <p class="panel-kicker">Personal AI OS</p>
+                        <h1>Welcome back, {{ current_user_display }}</h1>
+                        <p class="hero-text">Your dashboard, AI planner, and personal progress are connected in one calm workspace.</p>
+                    </div>
+                    <div class="workspace-actions">
+                        <button id="refreshDashboard" type="button" class="ghost-button">Refresh Dashboard</button>
+                        <button id="resetDay" type="button" class="ghost-button danger-button">Reset Day</button>
+                        <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+                    </div>
+                </header>
+
+                <section class="panel ai-plan-panel">
+                    <div class="panel-heading highlight-heading">
+                        <div>
+                            <p class="panel-kicker">Today's AI Plan</p>
+                            <h2>Smart guidance generated from your day</h2>
+                        </div>
+                        <span class="panel-pill highlight-pill">AI Generated Plan • Live</span>
+                    </div>
+                    <div id="aiSuggestionsList" class="suggestions-list plan-suggestions"></div>
+                </section>
+
+                <section class="panel ai-stage">
+                    <div class="ai-stage-toolbar">
+                        <button id="infoButton" type="button" class="info-button" aria-label="Open AI information" aria-haspopup="dialog" aria-controls="infoModal">
+                            &#8505;
+                        </button>
+                    </div>
+
+                    <div id="chatShell" class="chat-shell">
+                        <button id="chatToggle" class="chat-toggle chat-launcher" type="button" aria-label="Open AI chat" aria-expanded="false">
+                            <span class="chat-toggle-glow" aria-hidden="true"></span>
+                            <span class="chat-toggle-visual" aria-hidden="true">
+                                <span class="chat-toggle-avatar"></span>
+                                <span class="launcher-wave">&#128075;</span>
+                            </span>
+                            <span class="chat-toggle-copy">
+                                <span class="chat-toggle-label">Robot Assistant</span>
+                                <strong>Click to start your AI assistant</strong>
+                                <span>Open the chatbot for planning, study help, task breakdowns, and a better rhythm for the day.</span>
+                            </span>
+                            <span class="chat-toggle-cta">Start chat</span>
+                        </button>
+
+                        <section id="chatWidget" class="chat-widget hidden" aria-label="AI chatbot">
+                            <header class="chat-header">
+                                <div class="chat-brand">
+                                    <span class="chat-avatar" aria-hidden="true"></span>
+                                    <div>
+                                        <p class="chat-eyebrow">AI Assistant</p>
+                                        <h3>Neural Day Planner</h3>
+                                    </div>
+                                </div>
+                                <button id="chatClose" class="chat-close" type="button" aria-label="Close chat">&times;</button>
+                            </header>
+
+                            <section class="chat-guide" aria-label="Suggested questions">
+                                <p class="chat-guide-label">Try one of these quick prompts</p>
+                                <div class="chat-suggestions">
+                                    <button class="chat-suggestion" type="button" data-ai-action="focus" data-chat-question="What should I focus on first today based on my dashboard?">
+                                        What should I focus on today?
+                                    </button>
+                                    <button class="chat-suggestion" type="button" data-ai-action="study" data-chat-question="Use my sleep, energy, study, and tasks to help me plan the rest of today.">
+                                        Build my study plan
+                                    </button>
+                                    <button class="chat-suggestion" type="button" data-ai-action="energy" data-chat-question="Give me a short plan to raise my energy and stay productive today.">
+                                        Raise my energy
+                                    </button>
+                                    <button class="chat-suggestion" type="button" data-ai-action="evening" data-chat-question="Help me turn my remaining tasks into a calm step-by-step evening routine.">
+                                        Plan my evening
+                                    </button>
+                                </div>
+                            </section>
+
+                            <div id="chatMessages" class="chat-messages">
+                                {% if chat_history %}
+                                    {% for message in chat_history %}
+                                        <div class="chat-message {{ 'user' if message.role == 'user' else 'bot' }}">
+                                            {% if message.role != 'user' %}
+                                                <span class="chat-avatar chat-avatar-inline" aria-hidden="true"></span>
+                                            {% endif %}
+                                            <div class="chat-bubble">{{ message.content }}</div>
+                                        </div>
+                                    {% endfor %}
+                                {% else %}
+                                    <div class="chat-message bot">
+                                        <span class="chat-avatar chat-avatar-inline" aria-hidden="true"></span>
+                                        <div class="chat-bubble">Hi, I am your AI assistant. Ask me for a plan, a task breakdown, or a better rhythm for the rest of your day.</div>
+                                    </div>
+                                {% endif %}
+                            </div>
+
+                            <form id="chatForm" class="chat-form">
+                                <input type="text" id="chatInput" placeholder="Ask your AI assistant anything..." autocomplete="off">
+                                <button type="submit">Send</button>
+                            </form>
+                        </section>
+                    </div>
+                </section>
+
+                <section class="panel task-panel-left">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="panel-kicker">Task System</p>
+                            <h2>Daily Tasks &amp; Long-Term Goals</h2>
+                        </div>
+                        <div class="task-panel-tools">
+                            <span id="taskProgressMeta" class="task-progress-meta">Track your daily checklist here.</span>
+                            <button id="toggleTaskComposer" type="button" class="ghost-button">+ Add Task</button>
+                        </div>
+                    </div>
+                    <form id="quickTaskForm" class="task-add-form hidden-form">
+                        <input type="text" id="quickTaskInput" placeholder="Add a task for today">
+                        <select id="quickTaskType" aria-label="Task type">
+                            <option value="daily" selected>Today's Task</option>
+                            <option value="long_term">Long-Term Goal</option>
+                        </select>
+                        <select id="quickTaskPriority" aria-label="Task priority">
+                            <option value="High">High Priority</option>
+                            <option value="Medium" selected>Medium Priority</option>
+                            <option value="Low">Low Priority</option>
+                        </select>
+                        <button type="submit">Save Task</button>
+                    </form>
+                    <div class="task-section-grid">
+                        <section class="task-column">
+                            <div class="task-section-heading">
+                                <div>
+                                    <p class="panel-kicker">Daily</p>
+                                    <h3>Today's Tasks</h3>
+                                </div>
+                                <span id="dailyTaskMeta" class="task-progress-meta">Daily checklist updates live.</span>
+                            </div>
+                            <div id="dailyTaskList" class="task-grid" aria-label="Today's tasks list"></div>
+                        </section>
+                        <section class="task-column">
+                            <div class="task-section-heading">
+                                <div>
+                                    <p class="panel-kicker">Long-Term</p>
+                                    <h3>Goals &amp; Streaks</h3>
+                                </div>
+                                <span id="longTermTaskMeta" class="task-progress-meta">Keep the streak moving.</span>
+                            </div>
+                            <div id="longTermTaskList" class="task-grid" aria-label="Long-term goals list"></div>
+                        </section>
+                    </div>
+                </section>
+
+                <section class="panel health-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="panel-kicker">Health Insight</p>
+                            <h2>BMI &amp; Ideal Weight</h2>
+                        </div>
+                    </div>
+                    <form id="healthForm" class="health-form">
+                        <input type="number" id="heightInput" min="80" max="250" step="0.1" placeholder="Height (cm)">
+                        <input type="number" id="weightInput" min="20" max="400" step="0.1" placeholder="Weight (kg)">
+                        <button type="submit">Analyze</button>
+                    </form>
+                    <div id="healthInsightResult" class="health-result" aria-live="polite"></div>
+                </section>
+
+                <section class="workout-section panel" aria-label="Workout and activity">
+                    <div class="right-panel-header">
+                        <p class="panel-kicker">Workout &amp; Activity</p>
+                        <h2>&#127947; Movement Log</h2>
+                    </div>
+
+                    <form id="workoutForm" class="workout-form">
+                        <div class="setup-group">
+                            <span class="setup-label">Activity Type</span>
+                            <div id="workoutTypeGrid" class="workout-type-grid" role="radiogroup" aria-label="Activity type">
+                                <button type="button" class="workout-type-option active" data-activity-type="Walking" aria-pressed="true">Walking</button>
+                                <button type="button" class="workout-type-option" data-activity-type="Jogging" aria-pressed="false">Jogging</button>
+                                <button type="button" class="workout-type-option" data-activity-type="Running" aria-pressed="false">Running</button>
+                                <button type="button" class="workout-type-option" data-activity-type="Gym" aria-pressed="false">Gym</button>
+                            </div>
+                            <input type="hidden" id="workoutType" value="Walking">
+                        </div>
+
+                        <div class="setup-group">
+                            <label for="workoutDuration">Duration (minutes)</label>
+                            <input type="number" id="workoutDuration" min="1" max="300" placeholder="Minutes">
+                        </div>
+
+                        <button type="submit">Add Activity</button>
+                    </form>
+
+                    <div class="workout-summary">
+                        <h3>Today's Activity</h3>
+                        <p id="totalCaloriesText" class="workout-total"></p>
+                    </div>
+
+                    <div id="workoutList" class="workout-list"></div>
+
+                    <p id="dashboardFeedback" class="dashboard-feedback" aria-live="polite"></p>
+                </section>
+
+                <section class="panel motivation-panel">
+                    <div class="panel-heading">
+                        <div>
+                            <p class="panel-kicker">Daily Motivation</p>
+                            <h2>Stay steady</h2>
+                        </div>
+                    </div>
+                    <div id="motivationPanel" class="motivation-slot"></div>
+                </section>
+            </section>
+
+            <aside class="right-section">
+                <section class="dashboard-panel panel">
+                    <div class="right-panel-header">
+                        <p class="panel-kicker">Dashboard</p>
+                        <h2>Daily Metrics</h2>
+                    </div>
+
+                    <div class="metrics-grid" aria-label="Daily metrics">
+                        <section id="vitalBars" class="status-stack vital-bars compact-vitals" aria-label="Sleep and energy progress"></section>
+                        <section id="progressGrid" class="status-stack progress-grid compact-progress" aria-label="Calories and study cards"></section>
+                    </div>
+                </section>
+            </aside>
+        </main>
+    </div>
+
+    <section id="infoModal" class="info-modal hidden" aria-hidden="true">
+        <div class="info-modal-backdrop" data-close-info-modal></div>
+        <div class="info-modal-card" role="dialog" aria-modal="true" aria-labelledby="infoModalTitle">
+            <div class="info-modal-header">
+                <h2 id="infoModalTitle">About This AI</h2>
+                <button type="button" class="ghost-button" data-close-info-modal>Close</button>
+            </div>
+            <p>This AI helps you plan your day, manage tasks, track habits, and improve productivity using your personal data.</p>
+        </div>
+    </section>
+
+    <section id="energyModal" class="energy-modal hidden" aria-hidden="true">
+        <div class="energy-modal-backdrop" data-close-energy-modal></div>
+        <div class="energy-modal-card" role="dialog" aria-modal="true" aria-labelledby="energyModalTitle">
+            <div class="panel-heading">
+                <div>
+                    <p class="panel-kicker">Energy Check</p>
+                    <h2 id="energyModalTitle">Check My Energy</h2>
+                </div>
+                <button type="button" class="ghost-button" data-close-energy-modal>Close</button>
+            </div>
+
+            <p class="hero-text modal-text">
+                Answer each question from 1 to 5, then recalculate anytime. Your latest score updates the dashboard instantly.
+            </p>
+
+            <div id="energyQuestionList" class="energy-question-list"></div>
+            <p id="energyFeedback" class="dashboard-feedback" aria-live="polite"></p>
+
+            <div class="energy-modal-actions">
+                <button type="button" class="ghost-button" data-close-energy-modal>Cancel</button>
+                <button type="button" id="submitEnergyCheck">Save Energy Check</button>
+            </div>
+        </div>
+    </section>
+
+    <script>
+        window.dashboardState = {{ dashboard_state|tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/workout.js') }}"></script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
