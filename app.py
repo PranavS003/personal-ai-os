@@ -1,40 +1,149 @@
 import json
+import logging
 import os
 import sqlite3
+import sys
 import uuid
 from datetime import date, datetime, timedelta
 from functools import wraps
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
-from pathlib import Path
-from openai import OpenAI
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from jinja2 import TemplateNotFound
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
-env_path = Path(__file__).parent / ".env"
-load_dotenv(dotenv_path=env_path)
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - depends on deployment environment
+    OpenAI = None
+
+BASE_DIR = Path(__file__).resolve().parent
+TEMPLATES_DIR = BASE_DIR / "templates"
+STATIC_DIR = BASE_DIR / "static"
+STATIC_CSS_DIR = STATIC_DIR / "css"
+STATIC_JS_DIR = STATIC_DIR / "js"
+ENV_PATH = BASE_DIR / ".env"
+
+load_dotenv(dotenv_path=ENV_PATH)
 
 # ✅ ADD THIS PART HERE
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+def resolve_runtime_path(value, default_name):
+    raw_path = Path(value) if value else (BASE_DIR / default_name)
+    if not raw_path.is_absolute():
+        raw_path = BASE_DIR / raw_path
+    return raw_path
 
-if not GROQ_API_KEY:
-    raise ValueError("GROQ_API_KEY not found in .env")
+DATABASE_FILE = resolve_runtime_path(os.environ.get("PERSONAL_AI_OS_DB"), "database.db")
+APP_TIMEZONE = os.environ.get("PERSONAL_AI_OS_TIMEZONE", "Asia/Kolkata")
 
 # ✅ THEN use it here
-client = OpenAI(
-    api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
-)
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+IS_PRODUCTION = bool(os.environ.get("RENDER")) or os.environ.get("FLASK_ENV", "production").lower() == "production"
 
-app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "personal-ai-os-dev-secret")
+app = Flask(
+    __name__,
+    template_folder=str(TEMPLATES_DIR),
+    static_folder=str(STATIC_DIR),
+    static_url_path="/static",
+)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or "personal-ai-os-dev-secret"
+app.config.update(
+    PROPAGATE_EXCEPTIONS=False,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    TEMPLATES_AUTO_RELOAD=not IS_PRODUCTION,
+)
+
+
+def configure_logging(flask_app):
+    formatter = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
+    gunicorn_logger = logging.getLogger("gunicorn.error")
+    root_logger = logging.getLogger()
+
+    if gunicorn_logger.handlers:
+        flask_app.logger.handlers = gunicorn_logger.handlers
+        flask_app.logger.setLevel(gunicorn_logger.level or logging.INFO)
+        root_logger.handlers = gunicorn_logger.handlers
+        root_logger.setLevel(gunicorn_logger.level or logging.INFO)
+    else:
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+
+        if not root_logger.handlers:
+            root_logger.addHandler(stream_handler)
+        else:
+            for handler in root_logger.handlers:
+                handler.setFormatter(formatter)
+
+        root_logger.setLevel(logging.INFO)
+        flask_app.logger.handlers = root_logger.handlers
+        flask_app.logger.setLevel(root_logger.level)
+
+    flask_app.logger.propagate = False
+    logging.captureWarnings(True)
+
+
+def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logging.getLogger("personal_ai_os").critical(
+        "Uncaught exception during startup/runtime.",
+        exc_info=(exc_type, exc_value, exc_traceback),
+    )
+
+
+def ensure_directory(path, label):
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except Exception:  # pragma: no cover - depends on filesystem/runtime
+        app.logger.exception("Unable to prepare %s at %s", label, path)
+
+
+def prepare_runtime_paths():
+    ensure_directory(TEMPLATES_DIR, "templates directory")
+    ensure_directory(STATIC_DIR, "static directory")
+    ensure_directory(STATIC_CSS_DIR, "static css directory")
+    ensure_directory(STATIC_JS_DIR, "static js directory")
+    ensure_directory(DATABASE_FILE.parent, "database directory")
+
+    for template_name in ("index.html", "login.html", "onboarding.html", "register.html"):
+        template_path = TEMPLATES_DIR / template_name
+        if not template_path.exists():
+            app.logger.warning("Expected template is missing: %s", template_path)
+
+
+def safe_render_template(template_name, **context):
+    template_path = TEMPLATES_DIR / template_name
+    if not template_path.exists():
+        app.logger.error("Template file missing: %s", template_path)
+        return f"Template '{template_name}' is missing on the server.", 500
+
+    try:
+        return render_template(template_name, **context)
+    except TemplateNotFound:  # pragma: no cover - depends on deployment assets
+        app.logger.exception("Template resolution failed for %s", template_name)
+        return f"Template '{template_name}' could not be loaded.", 500
+
+
+configure_logging(app)
+sys.excepthook = handle_uncaught_exception
+prepare_runtime_paths()
+
+if not os.environ.get("GROQ_API_KEY"):
+    app.logger.warning("GROQ_API_KEY is not set. AI routes will stay available but return safe fallback messages.")
+
+if not os.environ.get("FLASK_SECRET_KEY") and not os.environ.get("SECRET_KEY"):
+    app.logger.warning("FLASK_SECRET_KEY is not set. Using a development fallback secret; set a real secret in production.")
 
 CHAT_SESSIONS = {}
 MAX_CHAT_MESSAGES = 20
 AI_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-DATABASE_PATH = os.environ.get("PERSONAL_AI_OS_DB", "database.db")
-APP_TIMEZONE = os.environ.get("PERSONAL_AI_OS_TIMEZONE", "Asia/Kolkata")
+DATABASE_PATH = str(DATABASE_FILE)
 SYSTEM_PROMPT = (
     "You are the helpful AI assistant inside Personal AI OS, a productivity dashboard. "
     "Give concise, practical, friendly answers that help the user plan, learn, and stay consistent. "
@@ -68,7 +177,8 @@ def get_ai_client():
 
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not set on the server.")
+        app.logger.warning("GROQ_API_KEY is missing. AI features will return a safe fallback response.")
+        raise RuntimeError("AI is not configured yet. Set GROQ_API_KEY on the server.")
 
     return OpenAI(
         api_key=api_key,
@@ -77,7 +187,10 @@ def get_ai_client():
 
 
 def get_db_connection():
-    return sqlite3.connect(DATABASE_PATH)
+    ensure_directory(DATABASE_FILE.parent, "database directory")
+    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
+    connection.execute("PRAGMA foreign_keys = ON")
+    return connection
 
 
 def get_current_time():
@@ -1175,127 +1288,150 @@ def require_current_user():
 
 def init_db():
     conn = get_db_connection()
-    cur = conn.cursor()
+    try:
+        cur = conn.cursor()
 
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
-            email TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL,
-            created_at TEXT NOT NULL
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                email TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
         )
-        """
-    )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS study (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject TEXT,
+                hours INTEGER
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS habits (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                habit TEXT,
+                streak INTEGER DEFAULT 0
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user TEXT NOT NULL,
+                entry_date TEXT NOT NULL,
+                activity_type TEXT NOT NULL,
+                duration INTEGER NOT NULL,
+                calories INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS energy_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                score INTEGER NOT NULL,
+                entry_date TEXT NOT NULL,
+                answers_json TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, entry_date)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS health_data (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                entry_date TEXT NOT NULL,
+                height_cm REAL NOT NULL,
+                weight_kg REAL NOT NULL,
+                bmi REAL NOT NULL,
+                category TEXT NOT NULL,
+                ideal_weight_min REAL NOT NULL,
+                ideal_weight_max REAL NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, entry_date)
+            )
+            """
+        )
 
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS tasks (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT
-        )
-        """
-    )
+        ensure_column(cur, "tasks", "user", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(cur, "tasks", "user_id", "INTEGER")
+        ensure_column(cur, "tasks", "entry_date", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(cur, "tasks", "priority", "TEXT NOT NULL DEFAULT 'Medium'")
+        ensure_column(cur, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'daily'")
+        ensure_column(cur, "tasks", "completed", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(cur, "tasks", "streak_count", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(cur, "tasks", "last_completed_date", "TEXT")
+        ensure_column(cur, "tasks", "completion_history_json", "TEXT NOT NULL DEFAULT '[]'")
+        ensure_column(cur, "tasks", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(cur, "tasks", "created_at", "TEXT")
+        ensure_column(cur, "study", "created_at", "TEXT")
+        ensure_column(cur, "study", "user", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(cur, "habits", "user", "TEXT NOT NULL DEFAULT ''")
+        ensure_column(cur, "workouts", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
+        ensure_daily_entries_schema(cur)
 
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS study (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            subject TEXT,
-            hours INTEGER
+        cur.execute(
+            """
+            UPDATE tasks
+            SET user_id = (
+                SELECT users.id
+                FROM users
+                WHERE lower(users.username) = lower(tasks.user)
+                LIMIT 1
+            )
+            WHERE (user_id IS NULL OR user_id = 0) AND user <> ''
+            """
         )
-        """
-    )
 
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS habits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            habit TEXT,
-            streak INTEGER DEFAULT 0
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS workouts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user TEXT NOT NULL,
-            entry_date TEXT NOT NULL,
-            activity_type TEXT NOT NULL,
-            duration INTEGER NOT NULL,
-            calories INTEGER NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS energy_logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            score INTEGER NOT NULL,
-            entry_date TEXT NOT NULL,
-            answers_json TEXT NOT NULL DEFAULT '[]',
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(user_id, entry_date)
-        )
-        """
-    )
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS health_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            entry_date TEXT NOT NULL,
-            height_cm REAL NOT NULL,
-            weight_kg REAL NOT NULL,
-            bmi REAL NOT NULL,
-            category TEXT NOT NULL,
-            ideal_weight_min REAL NOT NULL,
-            ideal_weight_max REAL NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(user_id, entry_date)
-        )
-        """
-    )
-    ensure_column(cur, "tasks", "user", "TEXT NOT NULL DEFAULT ''")
-    ensure_column(cur, "tasks", "user_id", "INTEGER")
-    ensure_column(cur, "tasks", "entry_date", "TEXT NOT NULL DEFAULT ''")
-    ensure_column(cur, "tasks", "priority", "TEXT NOT NULL DEFAULT 'Medium'")
-    ensure_column(cur, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'daily'")
-    ensure_column(cur, "tasks", "completed", "INTEGER NOT NULL DEFAULT 0")
-    ensure_column(cur, "tasks", "streak_count", "INTEGER NOT NULL DEFAULT 0")
-    ensure_column(cur, "tasks", "last_completed_date", "TEXT")
-    ensure_column(cur, "tasks", "completion_history_json", "TEXT NOT NULL DEFAULT '[]'")
-    ensure_column(cur, "tasks", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
-    ensure_column(cur, "tasks", "created_at", "TEXT")
-    ensure_column(cur, "study", "created_at", "TEXT")
-    ensure_column(cur, "study", "user", "TEXT NOT NULL DEFAULT ''")
-    ensure_column(cur, "habits", "user", "TEXT NOT NULL DEFAULT ''")
-    ensure_column(cur, "workouts", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
-    ensure_daily_entries_schema(cur)
-    cur.execute(
-        """
-        UPDATE tasks
-        SET user_id = (
-            SELECT users.id
-            FROM users
-            WHERE lower(users.username) = lower(tasks.user)
-            LIMIT 1
-        )
-        WHERE (user_id IS NULL OR user_id = 0) AND user <> ''
-        """
-    )
-
-    conn.commit()
-    conn.close()
+        conn.commit()
+        app.logger.info("SQLite database is ready at %s", DATABASE_PATH)
+    except Exception:
+        app.logger.exception("Database initialization failed for %s", DATABASE_PATH)
+        raise
+    finally:
+        conn.close()
 
 
 init_db()
+
+
+@app.errorhandler(Exception)
+def handle_application_error(error):
+    if isinstance(error, HTTPException):
+        return error
+
+    app.logger.exception(
+        "Unhandled exception during %s %s",
+        request.method,
+        request.path,
+    )
+
+    wants_json = request.is_json or request.path.startswith("/api") or request.accept_mimetypes.best == "application/json"
+    if wants_json:
+        return jsonify({"error": "Internal server error. Check server logs for details."}), 500
+
+    return "Internal server error. Check Render logs for the traceback.", 500
 
 
 def get_chat_session_id():
@@ -1539,9 +1675,12 @@ def get_openai_reply(history, user_message, dashboard_context):
             messages=messages,
         )
     except Exception as exc:  # pragma: no cover - depends on live API/runtime
+        app.logger.exception("AI chat request failed.")
         error_text = str(exc).lower()
         if "insufficient_quota" in error_text or "quota" in error_text:
             return "AI is temporarily unavailable. Please check API usage."
+        if "not configured yet" in error_text or "groq_api_key" in error_text:
+            raise RuntimeError("AI is not configured yet. Set GROQ_API_KEY on the server.") from exc
         raise RuntimeError("AI is temporarily unavailable. Please try again.") from exc
 
     response_text = (
@@ -1565,12 +1704,12 @@ def login():
             session["user_id"] = user["id"]
             return redirect(url_for("home"))
 
-        return render_template("login.html", error="Invalid credentials")
+        return safe_render_template("login.html", error="Invalid credentials")
 
     if get_current_user():
         return redirect(url_for("home"))
 
-    return render_template("login.html", error=None)
+    return safe_render_template("login.html", error=None)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -1583,7 +1722,7 @@ def register():
         try:
             user_id = create_user_account(username, email, password)
         except ValueError as exc:
-            return render_template(
+            return safe_render_template(
                 "register.html",
                 error=str(exc),
                 form_data={"username": username, "email": email},
@@ -1596,7 +1735,7 @@ def register():
     if get_current_user():
         return redirect(url_for("home"))
 
-    return render_template("register.html", error=None, form_data={"username": "", "email": ""})
+    return safe_render_template("register.html", error=None, form_data={"username": "", "email": ""})
 
 
 @app.route("/logout")
@@ -1611,7 +1750,7 @@ def home():
     if get_today_entry():
         return redirect(url_for("dashboard"))
 
-    return render_template(
+    return safe_render_template(
         "onboarding.html",
         current_user_display=format_user_name(get_current_user()),
         day_notice="New day started. Ready to plan?" if request.args.get("day_reset") == "1" else None,
@@ -1626,7 +1765,7 @@ def dashboard():
         return redirect(url_for("home"))
     dashboard_state = build_dashboard_state(today_entry)
 
-    return render_template(
+    return safe_render_template(
         "index.html",
         chat_history=get_chat_history(),
         today_entry=today_entry,
@@ -2423,12 +2562,13 @@ def chat():
 @app.route("/ai-action", methods=["POST"])
 def ai_action():
     try:
-        data = request.get_json()
-        user_message = data.get("message", "")
+        data = request.get_json(silent=True) or {}
+        user_message = (data.get("message") or "").strip()
         dashboard_context = get_dashboard_context()
+        client = get_ai_client()
 
         response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=AI_MODEL,
             messages=[
                 {
                     "role": "system",
@@ -2448,10 +2588,12 @@ def ai_action():
 
         return jsonify({"reply": reply})
 
-    except Exception as e:  # pragma: no cover - depends on live API/runtime
-        print("FULL ERROR:", str(e))
+    except Exception:  # pragma: no cover - depends on live API/runtime
+        app.logger.exception("AI action request failed.")
         return jsonify({"reply": "AI is temporarily unavailable."})
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", "5000"))
+    app.logger.info("Starting Flask development server on 0.0.0.0:%s", port)
+    app.run(host="0.0.0.0", port=port, debug=not IS_PRODUCTION)
