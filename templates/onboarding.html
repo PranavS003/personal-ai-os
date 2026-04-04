@@ -4,64 +4,96 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Daily Setup | Personal AI OS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body class="page-fade">
+<body class="page-fade onboarding-experience" data-user-key="{{ current_user_display|default('user')|lower }}">
     <div class="page-shell onboarding-shell">
         <div class="ambient ambient-one"></div>
         <div class="ambient ambient-two"></div>
+        <div class="ambient ambient-three"></div>
 
-        <main class="onboarding-page">
-            <section class="onboarding-card">
-                <div class="onboarding-copy">
-                    <p class="eyebrow">Personal AI OS</p>
-                    <h1>Good Morning &#128075;</h1>
-                    <p class="hero-text">Let&apos;s plan your day</p>
-                    {% if day_notice %}
-                        <p class="hero-text day-notice">{{ day_notice }}</p>
-                    {% endif %}
+        <main class="onboarding-page modern-onboarding-page">
+            <section class="onboarding-card onboarding-form-card simplified-setup-card">
+                <div class="intro-toolbar simplified-intro-toolbar">
+                    <div class="onboarding-copy simplified-copy">
+                        <h1 id="greetingHeading">Good Morning, {{ current_user_display }}</h1>
+                    </div>
+                    <div class="intro-toolbar-actions">
+                        <label class="skip-preference">
+                            <input type="checkbox" id="skipIntroPreference">
+                            <span>Don&apos;t show again</span>
+                        </label>
+                        <button type="button" id="skipIntroButton" class="ghost-button">Skip</button>
+                    </div>
                 </div>
 
                 <form id="dailySetupForm" class="daily-setup-form">
-                    <div class="setup-group">
-                        <label for="dailyTaskInput">What are your main tasks today?</label>
-                        <div class="input-row">
-                            <input type="text" id="dailyTaskInput" placeholder="Add a task for today">
-                            <button type="button" id="addDailyTask">Add task</button>
-                        </div>
-                        <div id="dailyTaskList" class="setup-task-list" aria-live="polite"></div>
-                    </div>
+                    <div class="setup-layout simplified-setup-layout">
+                        <div class="setup-column setup-flow-column">
+                            <div class="setup-group">
+                                <label for="dailyTaskInput">Today&apos;s priorities</label>
+                                <div id="suggestionGrid" class="quick-add-chip-row" aria-live="polite"></div>
+                                <div class="input-row compact-input-row">
+                                    <input type="text" id="dailyTaskInput" placeholder="Add a priority">
+                                    <button type="button" id="addDailyTask">Add</button>
+                                </div>
+                                <div id="dailyTaskList" class="setup-task-list" aria-live="polite"></div>
+                            </div>
 
-                    <div class="setup-group">
-                        <label for="sleepHours">Hours slept</label>
-                        <input type="number" id="sleepHours" min="0" max="24" step="0.5" placeholder="How many hours did you sleep?">
-                    </div>
+                            <div class="setup-group">
+                                <span class="setup-label">Current mood</span>
+                                <div class="choice-row mood-choice-row" data-choice-group="mood">
+                                    <button type="button" class="choice-button" data-value="Focused">Focused</button>
+                                    <button type="button" class="choice-button" data-value="Neutral">Neutral</button>
+                                    <button type="button" class="choice-button" data-value="Stressed">Stressed</button>
+                                    <button type="button" class="choice-button" data-value="Low Energy">Low Energy</button>
+                                </div>
+                            </div>
 
-                    <div class="setup-group">
-                        <span class="setup-label">Mood</span>
-                        <div class="choice-row" data-choice-group="mood">
-                            <button type="button" class="choice-button" data-value="Happy">Happy &#128522;</button>
-                            <button type="button" class="choice-button" data-value="Normal">Normal &#128528;</button>
-                            <button type="button" class="choice-button" data-value="Stressed">Stressed &#128531;</button>
-                        </div>
-                    </div>
+                            <div class="setup-group">
+                                <span class="setup-label">Workout done today</span>
+                                <div class="choice-row" data-choice-group="exercise">
+                                    <button type="button" class="choice-button" data-value="yes">Yes</button>
+                                    <button type="button" class="choice-button" data-value="no">No</button>
+                                </div>
+                            </div>
 
-                    <div class="setup-group">
-                        <span class="setup-label">Exercise</span>
-                        <div class="choice-row" data-choice-group="exercise">
-                            <button type="button" class="choice-button" data-value="yes">Yes</button>
-                            <button type="button" class="choice-button" data-value="no">No</button>
+                            <div id="workoutTypeSetupGroup" class="setup-group hidden-panel">
+                                <span class="setup-label">Workout type</span>
+                                <div id="setupWorkoutTypeGrid" class="workout-type-grid compact-chip-grid" role="radiogroup" aria-label="Workout type">
+                                    <button type="button" class="workout-type-option" data-setup-workout-type="Walking" aria-pressed="false">Walking</button>
+                                    <button type="button" class="workout-type-option" data-setup-workout-type="Running" aria-pressed="false">Running</button>
+                                    <button type="button" class="workout-type-option" data-setup-workout-type="Gym" aria-pressed="false">Gym</button>
+                                    <button type="button" class="workout-type-option" data-setup-workout-type="Jogging" aria-pressed="false">Jogging</button>
+                                    <button type="button" class="workout-type-option" data-setup-workout-type="Cycling" aria-pressed="false">Cycling</button>
+                                </div>
+                            </div>
+
+                            <div class="setup-group support-input-group">
+                                <label for="sleepHours">Hours slept</label>
+                                <input type="number" id="sleepHours" min="0" max="24" step="0.5" placeholder="Enter hours slept">
+                            </div>
                         </div>
                     </div>
 
                     <p id="setupFeedback" class="setup-feedback" aria-live="polite"></p>
 
-                    <button type="submit" id="startDayButton" class="start-day-button">Start My Day</button>
+                    <div class="form-footer">
+                        <button type="submit" id="startDayButton" class="start-day-button">Start My Day</button>
+                    </div>
                 </form>
             </section>
         </main>
     </div>
 
+    <script>
+        window.onboardingContext = {
+            userName: {{ current_user_display|tojson }}
+        };
+    </script>
     <script src="{{ url_for('static', filename='js/onboarding.js') }}"></script>
 </body>
 </html>

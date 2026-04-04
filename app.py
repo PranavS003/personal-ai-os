@@ -152,9 +152,17 @@ SYSTEM_PROMPT = (
 ENERGY_QUESTION_COUNT = 6
 WORKOUT_CALORIE_RATES = {
     "Walking": 4,
-    "Jogging": 7,
     "Running": 10,
     "Gym": 6,
+    "Jogging": 7,
+    "Cycling": 8,
+    "Swimming": 9,
+    "Yoga": 4,
+    "Stretching": 3,
+    "Sports": 8,
+    "Dancing": 6,
+    "House Work": 4,
+    "Climbing Stairs": 8,
 }
 TASK_PRIORITIES = {"High", "Medium", "Low"}
 AI_ACTION_PROMPTS = {
@@ -414,6 +422,10 @@ def generate_start_day_plan(tasks, sleep_hours, mood, exercised):
 
     if mood == "Stressed":
         plan_parts.append("Take breaks and avoid overload.")
+    elif mood == "Low Energy":
+        plan_parts.append("Start with light work, protect your focus, and build momentum gradually.")
+    elif mood == "Focused":
+        plan_parts.append("Use your focus early on the most important task.")
 
     if not exercised:
         plan_parts.append("Try a short walk today.")
@@ -500,20 +512,104 @@ def get_bmi_category(bmi_value):
     return "Overweight"
 
 
+def estimate_calorie_adjustment(weight_gap):
+    gap = abs(float(weight_gap or 0))
+    if gap < 2:
+        return 300
+    if gap < 6:
+        return 400
+    return 500
+
+
+def build_health_guidance(health_snapshot):
+    if not health_snapshot:
+        return None
+
+    bmi_value = float(health_snapshot.get("bmi") or 0)
+    weight_kg = float(health_snapshot.get("weight_kg") or 0)
+    ideal_min = float(health_snapshot.get("ideal_weight_min") or 0)
+    ideal_max = float(health_snapshot.get("ideal_weight_max") or 0)
+    category = health_snapshot.get("category") or get_bmi_category(bmi_value)
+
+    if bmi_value < 18.5:
+        calorie_delta = estimate_calorie_adjustment(ideal_min - weight_kg)
+        guidance = {
+            "goal": "Gain weight",
+            "calorie_delta": calorie_delta,
+            "calorie_direction": "increase",
+            "calorie_guidance": f"Increase ~{calorie_delta} kcal/day to reach a healthier weight gradually.",
+            "actions": [
+                f"Increase calories by ~{calorie_delta}/day",
+                "Eat protein-rich food",
+                "Add strength training",
+            ],
+            "foods_to_add": ["Protein-rich meals", "Milk or yogurt", "Nuts and rice"],
+            "foods_to_reduce": [],
+            "short_tip": f"Tip: Increase ~{calorie_delta} kcal/day",
+            "plan_slide": {
+                "icon": "🧠",
+                "text": f"Health Tip: Increase ~{calorie_delta} kcal/day and add strength training",
+            },
+        }
+    elif bmi_value <= 24.9:
+        guidance = {
+            "goal": "Maintain",
+            "calorie_delta": 0,
+            "calorie_direction": "maintain",
+            "calorie_guidance": "Maintain your current calories and stay active.",
+            "actions": [
+                "Follow a balanced diet",
+                "Keep regular exercise",
+            ],
+            "foods_to_add": ["Fruits", "Vegetables", "Protein"],
+            "foods_to_reduce": [],
+            "short_tip": "Tip: Maintain your calories and regular exercise",
+            "plan_slide": {
+                "icon": "🧠",
+                "text": "Health Tip: Keep a balanced diet and regular exercise",
+            },
+        }
+    else:
+        calorie_delta = estimate_calorie_adjustment(weight_kg - ideal_max)
+        guidance = {
+            "goal": "Lose weight",
+            "calorie_delta": calorie_delta,
+            "calorie_direction": "reduce",
+            "calorie_guidance": f"Reduce ~{calorie_delta} kcal/day to reach ideal weight gradually.",
+            "actions": [
+                f"Reduce calories by ~{calorie_delta}/day",
+                "Avoid junk food",
+                "Add cardio like walking or jogging",
+            ],
+            "foods_to_add": ["Fruits", "Vegetables", "Protein"],
+            "foods_to_reduce": ["Sugar", "Fried foods"],
+            "short_tip": f"Tip: Reduce ~{calorie_delta} kcal/day",
+            "plan_slide": {
+                "icon": "🧠",
+                "text": f"Health Tip: Reduce ~{calorie_delta} kcal/day and walk 20 min",
+            },
+        }
+
+    return {
+        **health_snapshot,
+        **guidance,
+    }
+
+
 def calculate_health_insight(height_cm, weight_kg):
     height_m = height_cm / 100
     bmi_value = weight_kg / (height_m ** 2)
     ideal_min = 18.5 * (height_m ** 2)
     ideal_max = 24.9 * (height_m ** 2)
 
-    return {
+    return build_health_guidance({
         "height_cm": round(height_cm, 1),
         "weight_kg": round(weight_kg, 1),
         "bmi": round(bmi_value, 1),
         "category": get_bmi_category(bmi_value),
         "ideal_weight_min": round(ideal_min, 1),
         "ideal_weight_max": round(ideal_max, 1),
-    }
+    })
 
 
 def ensure_column(cursor, table_name, column_name, definition):
@@ -962,37 +1058,6 @@ def sync_today_task_records(task_names, user=None, priority_lookup=None, complet
     conn.commit()
     conn.close()
 
-
-def get_latest_energy_log(user_id=None):
-    current_user_id = user_id or get_current_user_id()
-    if not current_user_id:
-        return None
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT score, entry_date, answers_json
-        FROM energy_logs
-        WHERE user_id = ?
-        ORDER BY entry_date DESC, id DESC
-        LIMIT 1
-        """,
-        (current_user_id,),
-    )
-    row = cur.fetchone()
-    conn.close()
-
-    if not row:
-        return None
-
-    return {
-        "score": int(row[0] or 0),
-        "entry_date": row[1],
-        "answers": coerce_json_list(row[2]),
-    }
-
-
 def save_energy_log(score, answers, user_id=None):
     current_user_id = user_id or get_current_user_id()
     if not current_user_id:
@@ -1046,7 +1111,7 @@ def get_latest_health_data(user_id=None):
     if not row:
         return None
 
-    return {
+    return build_health_guidance({
         "height_cm": row[0],
         "weight_kg": row[1],
         "bmi": row[2],
@@ -1054,7 +1119,7 @@ def get_latest_health_data(user_id=None):
         "ideal_weight_min": row[4],
         "ideal_weight_max": row[5],
         "entry_date": row[6],
-    }
+    })
 
 
 def save_health_data(height_cm, weight_kg, user_id=None):
@@ -1120,6 +1185,7 @@ def generate_daily_plan(data):
     exercise_minutes = int(data.get("exercise_minutes") or 0)
     calories_burned = int(data.get("calories_burned") or 0)
     current_hour = int(data.get("current_hour") or get_current_time().hour)
+    health_data = data.get("health") or {}
 
     suggestions = []
 
@@ -1138,6 +1204,10 @@ def generate_daily_plan(data):
         suggestions.append("You cleared your main tasks. Do a quick review and set up tomorrow's top priority.")
     else:
         suggestions.append("Add 1 or 2 clear tasks so the plan can become more specific.")
+
+    health_tip = health_data.get("plan_slide")
+    if health_tip:
+        suggestions.append(health_tip)
 
     if study_hours < 1:
         suggestions.append("Study for 1 hour in two short focused sessions.")
@@ -1194,6 +1264,7 @@ def build_dashboard_state(today_entry):
         "exercise_minutes": exercise_minutes,
         "calories_burned": calories_burned,
         "current_hour": get_current_time().hour,
+        "health": health_data,
     })
 
     return {
@@ -1277,14 +1348,6 @@ def build_dashboard_state(today_entry):
             "long_term_tasks": len(long_term_tasks),
         },
     }
-
-
-def require_current_user():
-    user = get_current_user()
-    if not user:
-        raise RuntimeError("User session is missing.")
-    return user
-
 
 def init_db():
     conn = get_db_connection()
@@ -1547,22 +1610,6 @@ def get_dashboard_context():
         f"- Long-Term Goals: {long_term_text}\n"
         f"- Health Insight: {health_text}"
     )
-
-
-def insert_study_entry(subject, hours, user=None):
-    current_user = user or get_current_user()
-    if not current_user:
-        raise RuntimeError("User session is missing.")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO study (subject, hours, created_at, user) VALUES (?, ?, ?, ?)",
-        (subject, hours, get_current_time().isoformat(timespec="seconds"), current_user),
-    )
-    conn.commit()
-    conn.close()
-
 
 def set_study_hours_total(hours, user=None):
     current_user = user or get_current_user()
@@ -1917,44 +1964,6 @@ def delete_task(task_id):
     conn.close()
 
     return jsonify({"status": "deleted"})
-
-
-@app.route("/add_study", methods=["POST"])
-@api_login_required
-def add_study():
-    current_user = get_current_user()
-    data = request.get_json(silent=True) or {}
-    subject = (data.get("subject") or "").strip()
-    hours = data.get("hours")
-
-    try:
-        hours = float(hours)
-    except (TypeError, ValueError):
-        hours = None
-
-    if not subject or not hours or hours <= 0:
-        return jsonify({"error": "Missing data"}), 400
-
-    try:
-        set_study_hours_total(min(24, get_today_study_hours(current_user) + hours), current_user)
-    except RuntimeError as exc:
-        return jsonify({"error": str(exc)}), 400
-
-    return jsonify({"message": "Study added"})
-
-
-@app.route("/get_study", methods=["GET"])
-@api_login_required
-def get_study():
-    current_user = get_current_user()
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT * FROM study WHERE user = ? ORDER BY id DESC", (current_user,))
-    data = cur.fetchall()
-    conn.close()
-
-    return jsonify(data)
-
 
 @app.route("/add_habit", methods=["POST"])
 @api_login_required
@@ -2415,7 +2424,7 @@ def submit_day_data():
     if sleep_hours is None or sleep_hours < 0 or sleep_hours > 24:
         return jsonify({"error": "Hours slept must be a number between 0 and 24."}), 400
 
-    if mood not in {"Happy", "Normal", "Stressed"}:
+    if mood not in {"Focused", "Neutral", "Stressed", "Low Energy"}:
         return jsonify({"error": "Please choose your mood for today."}), 400
 
     if exercised is None:
@@ -2593,7 +2602,20 @@ def ai_action():
         return jsonify({"reply": "AI is temporarily unavailable."})
 
 
+# Debug startup for Render / Gunicorn
+try:
+    app.logger.info("Flask app initialized successfully.")
+except Exception as e:
+    import traceback
+    print("STARTUP ERROR:", e)
+    traceback.print_exc()
+    raise
+
+
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", "5000"))
-    app.logger.info("Starting Flask development server on 0.0.0.0:%s", port)
-    app.run(host="0.0.0.0", port=port, debug=not IS_PRODUCTION)
+    import os
+
+    port = int(os.environ.get("PORT", 5000))
+    app.logger.info("Starting local Flask development server on http://127.0.0.1:%s", port)
+    print(f"Running locally on http://127.0.0.1:{port}")
+    app.run(host="0.0.0.0", port=port, debug=True)

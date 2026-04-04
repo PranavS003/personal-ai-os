@@ -5,7 +5,6 @@
     const infoButton = document.getElementById("infoButton");
     const infoModal = document.getElementById("infoModal");
     const energyModal = document.getElementById("energyModal");
-    const statusPane = document.querySelector(".status-pane");
 
     function syncChatShellState() {
         const isOpen = Boolean(chatWidget && !chatWidget.classList.contains("hidden"));
@@ -39,10 +38,6 @@
     if (chatWidget) {
         const observer = new MutationObserver(syncChatShellState);
         observer.observe(chatWidget, { attributes: true, attributeFilter: ["class"] });
-    }
-
-    if (statusPane) {
-        statusPane.setAttribute("data-enhanced", "true");
     }
 
     if (infoButton) {

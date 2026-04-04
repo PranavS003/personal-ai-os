@@ -4,19 +4,28 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login | Personal AI OS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body class="page-fade">
+<body class="page-fade auth-experience">
     <div class="page-shell auth-shell">
         <div class="ambient ambient-one"></div>
         <div class="ambient ambient-two"></div>
+        <div class="ambient ambient-three"></div>
 
         <main class="auth-page">
-            <section class="auth-card">
+            <section class="auth-card modern-auth-card">
                 <div class="auth-copy">
                     <p class="eyebrow">Personal AI OS</p>
-                    <h1>Welcome to Personal AI OS</h1>
-                    <p class="hero-text">Login to continue</p>
+                    <h1>Welcome back</h1>
+                    <p class="hero-text">Log in to your planning workspace and pick up your day with a faster, cleaner flow.</p>
+                    <div class="auth-feature-list">
+                        <span class="auth-feature-pill">AI planner</span>
+                        <span class="auth-feature-pill">Task tracking</span>
+                        <span class="auth-feature-pill">Workout insights</span>
+                    </div>
                 </div>
 
                 <form method="post" action="{{ url_for('login') }}" class="daily-setup-form">

@@ -6,22 +6,22 @@
     <title>Personal AI OS</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
-<body class="page-fade ai-os-page">
+<body class="page-fade ai-os-page modern-dashboard-page">
     <div class="page-shell">
         <div class="ambient ambient-one"></div>
         <div class="ambient ambient-two"></div>
         <div class="ambient ambient-three"></div>
 
-        <main class="app ai-os-layout dashboard-container">
+        <main class="app ai-os-layout dashboard-container dashboard-grid-shell">
             <section class="workspace-pane left-section">
-                <header class="panel workspace-topbar">
-                    <div class="workspace-copy">
+                <header class="panel workspace-topbar dashboard-hero-panel">
+                    <div class="workspace-copy dashboard-hero-copy">
                         <p class="panel-kicker">Personal AI OS</p>
                         <h1>Welcome back, {{ current_user_display }}</h1>
-                        <p class="hero-text">Your dashboard, AI planner, and personal progress are connected in one calm workspace.</p>
+                        <p id="dashboardHeroText" class="hero-text">Your day at a glance.</p>
                     </div>
                     <div class="workspace-actions">
                         <button id="refreshDashboard" type="button" class="ghost-button">Refresh Dashboard</button>
@@ -34,15 +34,51 @@
                     <div class="panel-heading highlight-heading">
                         <div>
                             <p class="panel-kicker">Today's AI Plan</p>
-                            <h2>Smart guidance generated from your day</h2>
+                            <h2>Actionable plan for today</h2>
                         </div>
                         <span class="panel-pill highlight-pill">AI Generated Plan • Live</span>
                     </div>
-                    <div id="aiSuggestionsList" class="suggestions-list plan-suggestions"></div>
+                    <div id="aiSuggestionsList" class="guidance-layout">
+                        <section class="guidance-slider-card" aria-label="Daily guidance">
+                            <div class="guidance-slider-head">
+                                <button id="guidancePrev" type="button" class="guidance-nav-button" aria-label="Previous guidance">&#8249;</button>
+                                <div class="guidance-slider-copy">
+                                    <span id="guidanceStep" class="guidance-step">Tip 1</span>
+                                    <div id="guidanceSlides" class="plan-slides guidance-slides" aria-live="polite">
+                                        <article class="plan-slide guidance-slide active" aria-hidden="false">
+                                            <span class="plan-slide-icon guidance-icon" aria-hidden="true">&#128218;</span>
+                                            <p class="plan-slide-text guidance-text">Guidance will appear here.</p>
+                                        </article>
+                                    </div>
+                                </div>
+                                <button id="guidanceNext" type="button" class="guidance-nav-button" aria-label="Next guidance">&#8250;</button>
+                            </div>
+                            <div id="guidanceDots" class="guidance-dots" aria-label="Guidance progress"></div>
+                        </section>
+                        <aside class="guidance-sidecards">
+                            <article class="guidance-sidecard streak-card" aria-label="Streak card">
+                                <span id="streakValue" class="streak-value">&#128293; 0 Day Streak</span>
+                                <p id="streakText" class="streak-text">Consistency builds momentum</p>
+                            </article>
+                            <article class="guidance-sidecard skill-card" aria-label="Skill suggestion">
+                                <span class="skill-card-label">Skill Suggestion</span>
+                                <div id="skillSuggestionSlides" class="plan-slides skill-slides" aria-live="polite">
+                                    <article class="plan-slide skill-slide active" aria-hidden="false">
+                                        <span class="plan-slide-icon skill-suggestion-icon" aria-hidden="true">&#128218;</span>
+                                        <p class="plan-slide-text skill-suggestion-text">Read 10 pages</p>
+                                    </article>
+                                </div>
+                            </article>
+                        </aside>
+                    </div>
                 </section>
 
                 <section class="panel ai-stage">
                     <div class="ai-stage-toolbar">
+                        <div>
+                            <p class="panel-kicker">AI Workspace</p>
+                            <h2>Talk through the next step</h2>
+                        </div>
                         <button id="infoButton" type="button" class="info-button" aria-label="Open AI information" aria-haspopup="dialog" aria-controls="infoModal">
                             &#8505;
                         </button>
@@ -53,7 +89,6 @@
                             <span class="chat-toggle-glow" aria-hidden="true"></span>
                             <span class="chat-toggle-visual" aria-hidden="true">
                                 <span class="chat-toggle-avatar"></span>
-                                <span class="launcher-wave">&#128075;</span>
                             </span>
                             <span class="chat-toggle-copy">
                                 <span class="chat-toggle-label">Robot Assistant</span>
@@ -123,100 +158,38 @@
                     <div class="panel-heading">
                         <div>
                             <p class="panel-kicker">Task System</p>
-                            <h2>Daily Tasks &amp; Long-Term Goals</h2>
+                            <h2>Tasks</h2>
                         </div>
-                        <div class="task-panel-tools">
-                            <span id="taskProgressMeta" class="task-progress-meta">Track your daily checklist here.</span>
-                            <button id="toggleTaskComposer" type="button" class="ghost-button">+ Add Task</button>
-                        </div>
+                        <span id="taskProgressMeta" class="task-progress-meta"></span>
                     </div>
-                    <form id="quickTaskForm" class="task-add-form hidden-form">
-                        <input type="text" id="quickTaskInput" placeholder="Add a task for today">
+                    <form id="quickTaskForm" class="task-add-form compact-task-form">
+                        <input type="text" id="quickTaskInput" placeholder="+ Add task">
                         <select id="quickTaskType" aria-label="Task type">
-                            <option value="daily" selected>Today's Task</option>
-                            <option value="long_term">Long-Term Goal</option>
+                            <option value="daily" selected>Task</option>
+                            <option value="long_term">Goal</option>
                         </select>
                         <select id="quickTaskPriority" aria-label="Task priority">
-                            <option value="High">High Priority</option>
-                            <option value="Medium" selected>Medium Priority</option>
-                            <option value="Low">Low Priority</option>
+                            <option value="High">High</option>
+                            <option value="Medium" selected>Medium</option>
+                            <option value="Low">Low</option>
                         </select>
-                        <button type="submit">Save Task</button>
+                        <button type="submit">Add</button>
                     </form>
-                    <div class="task-section-grid">
-                        <section class="task-column">
-                            <div class="task-section-heading">
-                                <div>
-                                    <p class="panel-kicker">Daily</p>
-                                    <h3>Today's Tasks</h3>
-                                </div>
-                                <span id="dailyTaskMeta" class="task-progress-meta">Daily checklist updates live.</span>
-                            </div>
-                            <div id="dailyTaskList" class="task-grid" aria-label="Today's tasks list"></div>
-                        </section>
-                        <section class="task-column">
-                            <div class="task-section-heading">
-                                <div>
-                                    <p class="panel-kicker">Long-Term</p>
-                                    <h3>Goals &amp; Streaks</h3>
-                                </div>
-                                <span id="longTermTaskMeta" class="task-progress-meta">Keep the streak moving.</span>
-                            </div>
-                            <div id="longTermTaskList" class="task-grid" aria-label="Long-term goals list"></div>
-                        </section>
+                    <div class="task-box-scroll">
+                        <div class="task-list-header">
+                            <h3>Today</h3>
+                            <span id="dailyTaskMeta" class="task-progress-meta"></span>
+                        </div>
+                        <div id="dailyTaskList" class="task-grid" aria-label="Today's tasks list"></div>
+                        <div class="task-box-divider">
+                            <span>Goals</span>
+                            <span id="longTermTaskMeta" class="task-progress-meta"></span>
+                        </div>
+                        <div id="longTermTaskList" class="task-grid goals-grid" aria-label="Long-term goals list"></div>
                     </div>
                 </section>
 
-                <section class="panel health-panel">
-                    <div class="panel-heading">
-                        <div>
-                            <p class="panel-kicker">Health Insight</p>
-                            <h2>BMI &amp; Ideal Weight</h2>
-                        </div>
-                    </div>
-                    <form id="healthForm" class="health-form">
-                        <input type="number" id="heightInput" min="80" max="250" step="0.1" placeholder="Height (cm)">
-                        <input type="number" id="weightInput" min="20" max="400" step="0.1" placeholder="Weight (kg)">
-                        <button type="submit">Analyze</button>
-                    </form>
-                    <div id="healthInsightResult" class="health-result" aria-live="polite"></div>
-                </section>
-
-                <section class="workout-section panel" aria-label="Workout and activity">
-                    <div class="right-panel-header">
-                        <p class="panel-kicker">Workout &amp; Activity</p>
-                        <h2>&#127947; Movement Log</h2>
-                    </div>
-
-                    <form id="workoutForm" class="workout-form">
-                        <div class="setup-group">
-                            <span class="setup-label">Activity Type</span>
-                            <div id="workoutTypeGrid" class="workout-type-grid" role="radiogroup" aria-label="Activity type">
-                                <button type="button" class="workout-type-option active" data-activity-type="Walking" aria-pressed="true">Walking</button>
-                                <button type="button" class="workout-type-option" data-activity-type="Jogging" aria-pressed="false">Jogging</button>
-                                <button type="button" class="workout-type-option" data-activity-type="Running" aria-pressed="false">Running</button>
-                                <button type="button" class="workout-type-option" data-activity-type="Gym" aria-pressed="false">Gym</button>
-                            </div>
-                            <input type="hidden" id="workoutType" value="Walking">
-                        </div>
-
-                        <div class="setup-group">
-                            <label for="workoutDuration">Duration (minutes)</label>
-                            <input type="number" id="workoutDuration" min="1" max="300" placeholder="Minutes">
-                        </div>
-
-                        <button type="submit">Add Activity</button>
-                    </form>
-
-                    <div class="workout-summary">
-                        <h3>Today's Activity</h3>
-                        <p id="totalCaloriesText" class="workout-total"></p>
-                    </div>
-
-                    <div id="workoutList" class="workout-list"></div>
-
-                    <p id="dashboardFeedback" class="dashboard-feedback" aria-live="polite"></p>
-                </section>
+                <p id="dashboardFeedback" class="dashboard-feedback dashboard-feedback-inline" aria-live="polite"></p>
 
                 <section class="panel motivation-panel">
                     <div class="panel-heading">
@@ -233,12 +206,128 @@
                 <section class="dashboard-panel panel">
                     <div class="right-panel-header">
                         <p class="panel-kicker">Dashboard</p>
-                        <h2>Daily Metrics</h2>
+                        <h2>Metrics</h2>
                     </div>
+                    <div id="progressGrid" class="metrics-compact-shell" aria-label="Daily metrics"></div>
+                </section>
 
-                    <div class="metrics-grid" aria-label="Daily metrics">
-                        <section id="vitalBars" class="status-stack vital-bars compact-vitals" aria-label="Sleep and energy progress"></section>
-                        <section id="progressGrid" class="status-stack progress-grid compact-progress" aria-label="Calories and study cards"></section>
+                <section class="panel insights-panel">
+                    <div class="right-panel-header insights-heading">
+                        <div>
+                            <p class="panel-kicker">Insights</p>
+                            <h2>Movement &amp; Health</h2>
+                        </div>
+                        <button id="toggleInsights" type="button" class="ghost-button compact-toggle-button" aria-expanded="true">Collapse</button>
+                    </div>
+                    <div id="insightsBody" class="insights-body">
+                        <section class="workout-section panel nested-insight-panel" aria-label="Workout and activity">
+                            <div class="right-panel-header">
+                                <p class="panel-kicker">Movement</p>
+                                <h3>Workout Log</h3>
+                            </div>
+
+                            <form id="workoutForm" class="workout-form">
+                                <div class="setup-group">
+                                    <div class="setup-group">
+                                        <div class="section-header-inline">
+                                            <div>
+                                                <span class="setup-label">Workout type</span>
+                                            </div>
+                                            <span id="selectedWorkoutBadge" class="panel-pill subtle-pill">Walking</span>
+                                        </div>
+                                        <div class="workout-picker-shell">
+                                            <div
+                                                id="workoutPicker"
+                                                class="workout-picker"
+                                                role="listbox"
+                                                aria-label="Workout type selector"
+                                                tabindex="0"
+                                            >
+                                                <button type="button" class="picker-item active" data-activity-type="Walking" data-icon="🚶" aria-selected="true">
+                                                    <span class="picker-icon" aria-hidden="true">🚶</span>
+                                                    <span class="picker-label">Walking</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Running" data-icon="🏃" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🏃</span>
+                                                    <span class="picker-label">Running</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Gym" data-icon="🏋️" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🏋️</span>
+                                                    <span class="picker-label">Gym</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Jogging" data-icon="👟" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">👟</span>
+                                                    <span class="picker-label">Jogging</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Cycling" data-icon="🚴" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🚴</span>
+                                                    <span class="picker-label">Cycling</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Swimming" data-icon="🏊" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🏊</span>
+                                                    <span class="picker-label">Swimming</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Yoga" data-icon="🧘" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🧘</span>
+                                                    <span class="picker-label">Yoga</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Stretching" data-icon="🤸" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🤸</span>
+                                                    <span class="picker-label">Stretching</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Sports" data-icon="⚽" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">⚽</span>
+                                                    <span class="picker-label">Sports</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Dancing" data-icon="💃" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">💃</span>
+                                                    <span class="picker-label">Dancing</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="House Work" data-icon="🧹" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🧹</span>
+                                                    <span class="picker-label">House Work</span>
+                                                </button>
+                                                <button type="button" class="picker-item" data-activity-type="Climbing Stairs" data-icon="🪜" aria-selected="false">
+                                                    <span class="picker-icon" aria-hidden="true">🪜</span>
+                                                    <span class="picker-label">Climbing Stairs</span>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <input type="hidden" id="workoutType" value="Walking">
+                                    </div>
+
+                                </div>
+
+                                <div class="setup-group">
+                                    <label for="workoutDuration">Duration (minutes)</label>
+                                    <input type="number" id="workoutDuration" min="1" max="300" placeholder="Minutes">
+                                </div>
+
+                                <button type="submit">Add Workout</button>
+                            </form>
+
+                            <div class="workout-summary">
+                                <h3>Today's Activity</h3>
+                                <p id="totalCaloriesText" class="workout-total"></p>
+                            </div>
+
+                            <div id="workoutList" class="workout-list"></div>
+                        </section>
+
+                        <section class="panel health-panel nested-insight-panel">
+                            <div class="panel-heading">
+                                <div>
+                                    <p class="panel-kicker">BMI Guide</p>
+                                    <h3>Health Snapshot</h3>
+                                </div>
+                            </div>
+                            <form id="healthForm" class="health-form">
+                                <input type="number" id="heightInput" min="80" max="250" step="0.1" placeholder="Height (cm)">
+                                <input type="number" id="weightInput" min="20" max="400" step="0.1" placeholder="Weight (kg)">
+                                <button type="submit">Check BMI</button>
+                            </form>
+                            <div id="healthInsightResult" class="health-result" aria-live="polite"></div>
+                        </section>
                     </div>
                 </section>
             </aside>
@@ -280,6 +369,16 @@
             </div>
         </div>
     </section>
+
+    <div class="support-container">
+        <button type="button" id="supportButton" class="support-btn" aria-expanded="false" aria-controls="supportPanel">
+            Support
+        </button>
+        <div id="supportPanel" class="support-panel" aria-hidden="true">
+            <p><span class="support-icon" aria-hidden="true">&#9993;</span> pranavsajith003@gmail.com</p>
+            <p><span class="support-icon" aria-hidden="true">&#9742;</span> 9074359676</p>
+        </div>
+    </div>
 
     <script>
         window.dashboardState = {{ dashboard_state|tojson }};

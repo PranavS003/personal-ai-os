@@ -1,13 +1,102 @@
 const workoutForm = document.getElementById("workoutForm");
 const workoutType = document.getElementById("workoutType");
-const workoutTypeGrid = document.getElementById("workoutTypeGrid");
+const workoutPicker = document.getElementById("workoutPicker");
 const workoutDuration = document.getElementById("workoutDuration");
 const workoutList = document.getElementById("workoutList");
 const totalCaloriesText = document.getElementById("totalCaloriesText");
-const workoutTypeButtons = Array.from(document.querySelectorAll("[data-activity-type]"));
+const selectedWorkoutBadge = document.getElementById("selectedWorkoutBadge");
+const workoutPickerItems = Array.from(workoutPicker?.querySelectorAll("[data-activity-type]") || []);
+
+let currentWorkoutIndex = 0;
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
 
 function setWorkoutFeedback(message, isError = false) {
     window.personalAiDashboard?.setDashboardFeedback?.(message, isError);
+}
+
+function renderWorkoutSummaryState(activityType = "") {
+    if (!selectedWorkoutBadge) {
+        return;
+    }
+
+    selectedWorkoutBadge.textContent = activityType || "Walking";
+}
+
+function getWrappedOffset(index, activeIndex, totalItems) {
+    let offset = index - activeIndex;
+    const half = Math.floor(totalItems / 2);
+
+    if (offset > half) {
+        offset -= totalItems;
+    } else if (offset < -half) {
+        offset += totalItems;
+    }
+
+    return offset;
+}
+
+function applyPickerItemState(item, offset) {
+    const distance = Math.abs(offset);
+    const isActive = offset === 0;
+    const isVisible = distance <= 2;
+    const translateY = offset * 40;
+    const scale = isActive ? 1.08 : distance === 1 ? 0.94 : 0.88;
+    const opacity = isActive ? 1 : distance === 1 ? 0.58 : distance === 2 ? 0.24 : 0;
+
+    item.classList.toggle("active", isActive);
+    item.classList.toggle("is-visible", isVisible);
+    item.setAttribute("aria-selected", isActive ? "true" : "false");
+    item.tabIndex = isActive ? 0 : -1;
+    item.style.transform = `translateY(${translateY}px) scale(${scale})`;
+    item.style.opacity = String(opacity);
+    item.style.zIndex = String(10 - distance);
+    item.style.pointerEvents = isVisible ? "auto" : "none";
+}
+
+function updateWorkoutPicker(index, { focusActive = false } = {}) {
+    if (!workoutPickerItems.length) {
+        return;
+    }
+
+    currentWorkoutIndex = (index + workoutPickerItems.length) % workoutPickerItems.length;
+    const activeItem = workoutPickerItems[currentWorkoutIndex];
+    const selectedValue = activeItem.dataset.activityType || "Walking";
+
+    if (workoutType) {
+        workoutType.value = selectedValue;
+    }
+
+    workoutPickerItems.forEach((item, itemIndex) => {
+        const offset = getWrappedOffset(itemIndex, currentWorkoutIndex, workoutPickerItems.length);
+        applyPickerItemState(item, offset);
+    });
+
+    renderWorkoutSummaryState(selectedValue);
+
+    if (focusActive) {
+        activeItem.focus({ preventScroll: true });
+    }
+}
+
+function syncWorkoutPickerToValue(value, options = {}) {
+    if (!workoutPickerItems.length) {
+        return;
+    }
+
+    const nextIndex = workoutPickerItems.findIndex((item) => item.dataset.activityType === value);
+    updateWorkoutPicker(nextIndex >= 0 ? nextIndex : 0, options);
+}
+
+function moveWorkoutPicker(direction) {
+    updateWorkoutPicker(currentWorkoutIndex + direction);
 }
 
 function renderWorkoutList(state) {
@@ -16,44 +105,29 @@ function renderWorkoutList(state) {
     }
 
     const workouts = state.workouts || [];
-    const workoutSummary = state.workout_summary || {
-        total_calories: 0,
-        total_minutes: 0,
-        goal_minutes: 30,
-    };
+    const totalMinutes = state.summary?.exercise_minutes ?? 0;
+    const totalCalories = state.summary?.calories_burned ?? 0;
+    const goalMinutes = 30;
+    const latestWorkout = workouts[0]?.activity_type;
 
-    totalCaloriesText.textContent = `${workoutSummary.total_calories} kcal burned today | ${workoutSummary.total_minutes} / ${workoutSummary.goal_minutes} min active`;
+    totalCaloriesText.textContent = `${totalCalories} kcal burned today | ${totalMinutes} / ${goalMinutes} min active`;
+
+    if (latestWorkout) {
+        syncWorkoutPickerToValue(latestWorkout);
+    }
 
     if (!workouts.length) {
-        workoutList.innerHTML = '<p class="setup-empty">No activity logged yet. Add a workout to start tracking calories.</p>';
+        workoutList.innerHTML = '<p class="setup-empty">No workout logged yet. Pick an activity and add the time.</p>';
         return;
     }
 
     workoutList.innerHTML = workouts.map((workout) => `
         <article class="workout-item">
-            <strong>${workout.activity_type}</strong>
+            <strong>${escapeHtml(workout.activity_type)}</strong>
             <span>${workout.duration} min</span>
             <span>${workout.calories} kcal</span>
         </article>
     `).join("");
-}
-
-function setWorkoutType(value) {
-    if (!workoutTypeButtons.length) {
-        return;
-    }
-
-    const selectedValue = value || workoutTypeButtons[0].dataset.activityType || "Walking";
-
-    if (workoutType) {
-        workoutType.value = selectedValue;
-    }
-
-    workoutTypeButtons.forEach((button) => {
-        const isActive = button.dataset.activityType === selectedValue;
-        button.classList.toggle("active", isActive);
-        button.setAttribute("aria-pressed", isActive ? "true" : "false");
-    });
 }
 
 async function handleWorkoutSubmit(event) {
@@ -61,6 +135,11 @@ async function handleWorkoutSubmit(event) {
 
     const activityType = workoutType ? workoutType.value : "";
     const duration = Number(workoutDuration ? workoutDuration.value : 0);
+
+    if (!activityType) {
+        setWorkoutFeedback("Choose a workout type first.", true);
+        return;
+    }
 
     if (!duration) {
         setWorkoutFeedback("Please enter workout duration before adding activity.", true);
@@ -90,7 +169,7 @@ async function handleWorkoutSubmit(event) {
         }
 
         window.personalAiDashboard?.renderDashboard?.(data.dashboard_state);
-        setWorkoutFeedback("Workout activity added.");
+        setWorkoutFeedback(`${activityType} workout added.`);
     } catch (error) {
         setWorkoutFeedback("Could not reach the server. Please try again.", true);
     }
@@ -100,15 +179,36 @@ if (workoutForm) {
     workoutForm.addEventListener("submit", handleWorkoutSubmit);
 }
 
-if (workoutTypeGrid) {
-    workoutTypeGrid.addEventListener("click", (event) => {
-        const button = event.target.closest("[data-activity-type]");
-        if (!button) {
+if (workoutPicker) {
+    workoutPicker.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        moveWorkoutPicker(event.deltaY > 0 ? 1 : -1);
+        setWorkoutFeedback("");
+    }, { passive: false });
+
+    workoutPicker.addEventListener("click", (event) => {
+        const item = event.target.closest("[data-activity-type]");
+        if (!item) {
             return;
         }
 
-        setWorkoutType(button.dataset.activityType);
+        syncWorkoutPickerToValue(item.dataset.activityType, { focusActive: true });
         setWorkoutFeedback("");
+    });
+
+    workoutPicker.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            moveWorkoutPicker(1);
+            setWorkoutFeedback("");
+            return;
+        }
+
+        if (event.key === "ArrowUp") {
+            event.preventDefault();
+            moveWorkoutPicker(-1);
+            setWorkoutFeedback("");
+        }
     });
 }
 
@@ -116,5 +216,5 @@ document.addEventListener("personal-ai-os:dashboard-updated", (event) => {
     renderWorkoutList(event.detail);
 });
 
-setWorkoutType(workoutType ? workoutType.value : "Walking");
+syncWorkoutPickerToValue(workoutType ? workoutType.value : "Walking");
 renderWorkoutList(window.personalAiDashboard?.getDashboardState?.());

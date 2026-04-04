@@ -1,6 +1,14 @@
 const progressGrid = document.getElementById("progressGrid");
 const motivationPanel = document.getElementById("motivationPanel");
 const aiSuggestionsList = document.getElementById("aiSuggestionsList");
+const guidancePrevButton = document.getElementById("guidancePrev");
+const guidanceNextButton = document.getElementById("guidanceNext");
+const guidanceStep = document.getElementById("guidanceStep");
+const guidanceDots = document.getElementById("guidanceDots");
+const guidanceSlidesContainer = document.getElementById("guidanceSlides");
+const streakValue = document.getElementById("streakValue");
+const streakText = document.getElementById("streakText");
+const skillSuggestionSlidesContainer = document.getElementById("skillSuggestionSlides");
 const taskProgressMeta = document.getElementById("taskProgressMeta");
 const dailyTaskList = document.getElementById("dailyTaskList");
 const dailyTaskMeta = document.getElementById("dailyTaskMeta");
@@ -9,7 +17,6 @@ const longTermTaskMeta = document.getElementById("longTermTaskMeta");
 const refreshDashboardButton = document.getElementById("refreshDashboard");
 const resetDayButton = document.getElementById("resetDay");
 const dashboardFeedback = document.getElementById("dashboardFeedback");
-const vitalBars = document.getElementById("vitalBars");
 const energyModal = document.getElementById("energyModal");
 const energyQuestionList = document.getElementById("energyQuestionList");
 const energyFeedback = document.getElementById("energyFeedback");
@@ -24,7 +31,6 @@ const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
 const chatSendButton = chatForm ? chatForm.querySelector("button") : null;
 const chatSuggestions = Array.from(document.querySelectorAll("[data-chat-question]"));
-const toggleTaskComposerButton = document.getElementById("toggleTaskComposer");
 const quickTaskForm = document.getElementById("quickTaskForm");
 const quickTaskInput = document.getElementById("quickTaskInput");
 const quickTaskType = document.getElementById("quickTaskType");
@@ -33,6 +39,11 @@ const healthForm = document.getElementById("healthForm");
 const heightInput = document.getElementById("heightInput");
 const weightInput = document.getElementById("weightInput");
 const healthInsightResult = document.getElementById("healthInsightResult");
+const toggleInsightsButton = document.getElementById("toggleInsights");
+const insightsBody = document.getElementById("insightsBody");
+const dashboardHeroText = document.getElementById("dashboardHeroText");
+const supportButton = document.getElementById("supportButton");
+const supportPanel = document.getElementById("supportPanel");
 
 const energyQuestions = [
     "How many hours did you sleep?",
@@ -50,8 +61,37 @@ const motivationMessages = [
     "Protect your energy, then put it where it matters most."
 ];
 
+let focusLabel = "Study";
 let dashboardState = window.dashboardState || null;
 let energyAnswers = Array(energyQuestions.length).fill(0);
+let guidanceTips = [];
+let currentGuidanceIndex = 0;
+let guidanceTimer = null;
+let skillSuggestions = [];
+let currentSkillSuggestionIndex = 0;
+let skillSuggestionTimer = null;
+let supportHideTimer = null;
+
+const GUIDANCE_ROTATION_MS = 5000;
+const SKILL_ROTATION_MS = 5000;
+const METRIC_TARGET_STORAGE_KEY = "personal-ai-os.metric-targets";
+const DEFAULT_METRIC_TARGETS = Object.freeze({
+    sleep: 8,
+    study: 4,
+    calories: 400,
+});
+const metricPickerStates = new Map();
+const metricSaveTimers = new Map();
+let metricTargets = loadMetricTargets();
+
+function escapeHtml(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+}
 
 function setDashboardFeedback(message, isError = false) {
     if (!dashboardFeedback) {
@@ -62,6 +102,34 @@ function setDashboardFeedback(message, isError = false) {
     dashboardFeedback.classList.toggle("error", isError);
 }
 
+function setSupportPanelOpen(isOpen) {
+    if (!supportButton || !supportPanel) {
+        return;
+    }
+
+    supportPanel.classList.toggle("show", isOpen);
+    supportButton.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    supportPanel.setAttribute("aria-hidden", isOpen ? "false" : "true");
+}
+
+function clearSupportHideTimer() {
+    if (!supportHideTimer) {
+        return;
+    }
+
+    window.clearTimeout(supportHideTimer);
+    supportHideTimer = null;
+}
+
+function queueSupportHide() {
+    clearSupportHideTimer();
+    supportHideTimer = window.setTimeout(() => {
+        if (!supportPanel?.matches(":hover") && !supportButton?.matches(":hover")) {
+            setSupportPanelOpen(false);
+        }
+    }, 200);
+}
+
 function setEnergyFeedback(message, isError = false) {
     if (!energyFeedback) {
         return;
@@ -69,17 +137,6 @@ function setEnergyFeedback(message, isError = false) {
 
     energyFeedback.textContent = message;
     energyFeedback.classList.toggle("error", isError);
-}
-
-function createProgressRing({ percent = 0, mainValue = "0", unit = "", delay = 0 }) {
-    return `
-        <div class="progress-ring" data-progress="${percent}" data-delay="${delay}">
-            <div class="progress-ring-inner">
-                <strong>${mainValue}</strong>
-                ${unit ? `<span class="ring-unit">${unit}</span>` : ""}
-            </div>
-        </div>
-    `;
 }
 
 function getMetricMap(metrics = []) {
@@ -98,53 +155,212 @@ function getDailyMotivation(entryDate = "") {
     return motivationMessages[seed % motivationMessages.length];
 }
 
-function createExerciseCaloriesCard(caloriesMetric, summary) {
-    const exerciseMinutes = summary.exercise_minutes ?? 0;
-    const caloriesBurned = summary.calories_burned ?? 0;
+function buildFallbackGuidance(state = {}) {
+    const summary = state.summary || {};
+    const pendingTasks = state.daily_tasks || state.tasks || [];
+    const incompleteTasks = pendingTasks.filter((task) => !task.completed);
+    const tips = [];
+
+    if ((summary.sleep_hours ?? 0) < 6) {
+        tips.push("Start with light study or planning");
+    }
+    if (incompleteTasks.length) {
+        tips.push("Complete your pending tasks");
+    }
+    if ((summary.study_hours ?? 0) < 1) {
+        tips.push(`${focusLabel} for 1 hour in focused sessions`);
+    }
+    if ((summary.exercise_minutes ?? 0) < 15) {
+        tips.push("Take a short walk to refresh");
+    }
+
+    tips.push("Protect one calm block for your hardest task");
+    return Array.from(new Set(tips));
+}
+
+function getPlanIcon(text = "", fallbackIcon = "\u2728") {
+    const normalizedText = String(text || "").toLowerCase();
+
+    if (["study", "learn", "concept", "class", "revision"].some((keyword) => normalizedText.includes(keyword))) {
+        return "\uD83D\uDCD8";
+    }
+    if (["read", "reading", "pages", "review"].some((keyword) => normalizedText.includes(keyword))) {
+        return "\uD83D\uDCD6";
+    }
+    if (["walk", "exercise", "workout", "active", "stretch"].some((keyword) => normalizedText.includes(keyword))) {
+        return "\uD83C\uDFC3";
+    }
+    if (["plan", "planning", "priority", "schedule"].some((keyword) => normalizedText.includes(keyword))) {
+        return "\uD83D\uDCCB";
+    }
+    if (["work", "task", "assignment", "focus", "project", "admin"].some((keyword) => normalizedText.includes(keyword))) {
+        return "\uD83D\uDCBB";
+    }
+    if (["rest", "calm", "sleep", "wind down"].some((keyword) => normalizedText.includes(keyword))) {
+        return "\uD83C\uDF19";
+    }
+
+    return fallbackIcon;
+}
+
+function normalizeGuidanceTip(tip) {
+    if (tip && typeof tip === "object") {
+        const text = String(tip.text || tip.title || "").trim();
+        return {
+            icon: tip.icon || getPlanIcon(text, "\uD83D\uDCA1"),
+            text: text || "Protect one calm block for your hardest task",
+        };
+    }
+
+    const text = String(tip || "").trim() || "Protect one calm block for your hardest task";
+    return {
+        icon: getPlanIcon(text, "\uD83D\uDCA1"),
+        text,
+    };
+}
+
+function getStreakDetails(state = {}) {
+    const longTermTasks = state.long_term_tasks || [];
+    const streakCount = longTermTasks.reduce((max, task) => Math.max(max, Number(task.streak_count) || 0), 0);
+
+    if (streakCount >= 7) {
+        return { count: streakCount, text: "Strong rhythm. Keep the chain alive" };
+    }
+    if (streakCount >= 3) {
+        return { count: streakCount, text: "Consistency builds momentum" };
+    }
+    if (streakCount >= 1) {
+        return { count: streakCount, text: "Small wins are stacking up" };
+    }
+    return { count: 0, text: "Start one small streak today" };
+}
+
+function buildSkillSuggestions(state = {}) {
+    const dailyTasks = state.daily_tasks || state.tasks || [];
+    const incompleteTasks = dailyTasks.filter((task) => !task.completed);
+    const suggestions = [];
+
+    if (incompleteTasks[0]?.name) {
+        suggestions.push({ icon: getPlanIcon(incompleteTasks[0].name, "\uD83D\uDCBB"), text: incompleteTasks[0].name });
+    }
+
+    suggestions.push({ icon: "\uD83D\uDCD6", text: "Read 10 pages" });
+    suggestions.push({ icon: "\uD83D\uDCBB", text: `Work on your ${focusLabel.toLowerCase()}` });
+    suggestions.push({ icon: "\uD83D\uDCD8", text: "Learn a new concept" });
+
+    if ((state.summary?.exercise_minutes ?? 0) < 15) {
+        suggestions.push({ icon: "\uD83C\uDFC3", text: "Add a quick workout break" });
+    }
+
+    return suggestions.filter((item, index, items) => items.findIndex((entry) => entry.text === item.text) === index);
+}
+
+function buildPlanSlideMarkup(item, index, variant, isActive) {
+    const textClass = variant === "skill" ? "skill-suggestion-text" : "guidance-text";
+    const iconClass = variant === "skill" ? "skill-suggestion-icon" : "guidance-icon";
+    const slideClass = variant === "skill" ? "skill-slide" : "guidance-slide";
 
     return `
-        <article class="life-card theme-calories">
-            <div class="life-card-header life-card-toolbar">
-                <div>
-                    <p class="card-label">Movement</p>
-                    <h3>Calories</h3>
-                </div>
-                <button type="button" class="metric-edit-button" data-metric-key="calories" data-current-value="${caloriesBurned}" aria-label="Update calories">Update</button>
-            </div>
-            ${createProgressRing({
-                percent: caloriesMetric.percent,
-                mainValue: `${caloriesBurned}`,
-                unit: "kcal",
-                delay: 0,
-            })}
-            <p class="ring-caption">Calories burned today</p>
-            <p class="life-value">${caloriesMetric.value}</p>
-            <p class="metric-note">Active time: ${exerciseMinutes} min</p>
+        <article class="plan-slide ${slideClass} ${isActive ? "active" : ""}" data-slide-index="${index}" aria-hidden="${isActive ? "false" : "true"}">
+            <span class="plan-slide-icon ${iconClass}" aria-hidden="true">${escapeHtml(item.icon)}</span>
+            <p class="plan-slide-text ${textClass}">${escapeHtml(item.text)}</p>
         </article>
     `;
 }
 
-function createStudyCard(studyMetric, summary) {
-    return `
-        <article class="life-card theme-study study-card">
-            <div class="life-card-header">
-                <p class="card-label">Focus</p>
-                <h3>Study Progress</h3>
-            </div>
-            ${createProgressRing({
-                percent: studyMetric.percent,
-                mainValue: `${summary.study_hours ?? 0}`,
-                unit: "hrs",
-                delay: 140,
-            })}
-            <p class="ring-caption">Logged study hours</p>
-            <p class="life-value">${studyMetric.value}</p>
-            <div class="study-actions">
-                <button type="button" class="study-control-button" data-study-action="add" aria-label="Add study hour">+1 Hour</button>
-                <button type="button" class="study-control-button secondary" data-study-action="remove" aria-label="Remove study hour">-1 Hour</button>
-            </div>
-        </article>
-    `;
+function renderGuidanceSlides() {
+    if (!guidanceSlidesContainer) {
+        return;
+    }
+
+    guidanceSlidesContainer.innerHTML = guidanceTips.map((tip, index) => {
+        return buildPlanSlideMarkup(tip, index, "guidance", index === currentGuidanceIndex);
+    }).join("");
+}
+
+function renderSkillSlides() {
+    if (!skillSuggestionSlidesContainer) {
+        return;
+    }
+
+    skillSuggestionSlidesContainer.innerHTML = skillSuggestions.map((suggestion, index) => {
+        return buildPlanSlideMarkup(suggestion, index, "skill", index === currentSkillSuggestionIndex);
+    }).join("");
+}
+
+function setActiveSlide(container, activeIndex) {
+    if (!container) {
+        return;
+    }
+
+    Array.from(container.children).forEach((slide, index) => {
+        const isActive = index === activeIndex;
+        slide.classList.toggle("active", isActive);
+        slide.setAttribute("aria-hidden", isActive ? "false" : "true");
+    });
+}
+
+function updateGuidanceDots() {
+    if (!guidanceDots) {
+        return;
+    }
+
+    guidanceDots.innerHTML = guidanceTips.map((_, index) => `
+        <button
+            type="button"
+            class="guidance-dot ${index === currentGuidanceIndex ? "active" : ""}"
+            data-guidance-index="${index}"
+            aria-label="Go to guidance ${index + 1}"
+        ></button>
+    `).join("");
+}
+
+function showGuidanceTip(index) {
+    if (!guidanceSlidesContainer || !guidanceStep || !guidanceTips.length) {
+        return;
+    }
+
+    currentGuidanceIndex = (index + guidanceTips.length) % guidanceTips.length;
+    guidanceStep.textContent = `Tip ${currentGuidanceIndex + 1}`;
+    setActiveSlide(guidanceSlidesContainer, currentGuidanceIndex);
+    updateGuidanceDots();
+}
+
+function resetGuidanceTimer() {
+    if (guidanceTimer) {
+        window.clearInterval(guidanceTimer);
+    }
+
+    if (guidanceTips.length < 2) {
+        return;
+    }
+
+    guidanceTimer = window.setInterval(() => {
+        showGuidanceTip(currentGuidanceIndex + 1);
+    }, GUIDANCE_ROTATION_MS);
+}
+
+function showSkillSuggestion(index) {
+    if (!skillSuggestionSlidesContainer || !skillSuggestions.length) {
+        return;
+    }
+
+    currentSkillSuggestionIndex = (index + skillSuggestions.length) % skillSuggestions.length;
+    setActiveSlide(skillSuggestionSlidesContainer, currentSkillSuggestionIndex);
+}
+
+function resetSkillSuggestionTimer() {
+    if (skillSuggestionTimer) {
+        window.clearInterval(skillSuggestionTimer);
+    }
+
+    if (skillSuggestions.length < 2) {
+        return;
+    }
+
+    skillSuggestionTimer = window.setInterval(() => {
+        showSkillSuggestion(currentSkillSuggestionIndex + 1);
+    }, SKILL_ROTATION_MS);
 }
 
 function renderMotivationCard(entryDate) {
@@ -160,133 +376,567 @@ function renderMotivationCard(entryDate) {
     `;
 }
 
-function createVitalBar(key, bar) {
-    const isEnergy = key === "energy";
-    const label = isEnergy ? "Energy Level" : "Sleep Tracker";
-    const currentValue = isEnergy ? bar.percent : Number.parseFloat(bar.value) || 0;
-    const energyTone = bar.percent >= 70 ? "high" : (bar.percent >= 40 ? "medium" : "low");
-    const actionButton = isEnergy
-        ? `<button type="button" class="metric-edit-button energy-recalc-button" id="openEnergyModal" aria-label="Calculate energy">Calculate Energy</button>`
-        : `<button type="button" class="metric-edit-button" data-metric-key="${key}" data-current-value="${currentValue}" aria-label="Update ${label}">Update</button>`;
-
-    return `
-        <article class="vital-card theme-${key} ${isEnergy ? `energy-tone-${energyTone}` : ""}">
-            <div class="vital-card-header life-card-toolbar">
-                <div>
-                    <p class="card-label">${isEnergy ? "Charge" : "Recovery"}</p>
-                    <h3>${bar.emoji} ${label}</h3>
-                </div>
-                ${actionButton}
-            </div>
-            <div class="vital-bar-shell">
-                <div class="vital-bar-track">
-                    <div class="vital-bar-fill ${isEnergy ? `energy-fill-${energyTone}` : ""}" data-bar-fill="${key}" data-percent="${bar.percent}">
-                        <span class="vital-bar-percent">${bar.percent}%</span>
-                    </div>
-                </div>
-            </div>
-            <div class="vital-bar-meta">
-                <span>${bar.value}</span>
-            </div>
-        </article>
-    `;
-}
-
-function renderSuggestions(suggestions) {
+function renderSuggestions(suggestions, state = {}) {
     if (!aiSuggestionsList) {
         return;
     }
 
-    aiSuggestionsList.classList.remove("is-refreshing");
-    void aiSuggestionsList.offsetWidth;
-    aiSuggestionsList.classList.add("is-refreshing");
+    guidanceTips = (suggestions.length ? suggestions : buildFallbackGuidance(state)).map(normalizeGuidanceTip);
+    currentGuidanceIndex = Math.min(currentGuidanceIndex, Math.max(guidanceTips.length - 1, 0));
+    renderGuidanceSlides();
 
-    if (!suggestions.length) {
-        aiSuggestionsList.innerHTML = `
-            <article class="suggestion-chip">
-                <span class="suggestion-dot"></span>
-                <p>Your AI plan will appear here as soon as today's dashboard data is available.</p>
-            </article>
-        `;
+    if (guidanceTips.length) {
+        showGuidanceTip(currentGuidanceIndex);
+        resetGuidanceTimer();
+    }
+
+    if (guidancePrevButton) {
+        guidancePrevButton.disabled = guidanceTips.length < 2;
+    }
+    if (guidanceNextButton) {
+        guidanceNextButton.disabled = guidanceTips.length < 2;
+    }
+
+    const streak = getStreakDetails(state);
+    if (streakValue) {
+        streakValue.textContent = `\uD83D\uDD25 ${streak.count} Day${streak.count === 1 ? "" : "s"} Streak`;
+    }
+    if (streakText) {
+        streakText.textContent = streak.text;
+    }
+
+    skillSuggestions = buildSkillSuggestions(state);
+    currentSkillSuggestionIndex = Math.min(currentSkillSuggestionIndex, Math.max(skillSuggestions.length - 1, 0));
+    renderSkillSlides();
+    showSkillSuggestion(currentSkillSuggestionIndex);
+    resetSkillSuggestionTimer();
+}
+
+function clampPercent(value) {
+    return Math.max(0, Math.min(Number(value) || 0, 100));
+}
+
+function syncFocusLabel(nextLabel = "") {
+    focusLabel = String(nextLabel || focusLabel || "Study").trim() || "Study";
+    const focusLabelElement = document.getElementById("focusLabel");
+    if (focusLabelElement) {
+        focusLabelElement.innerText = focusLabel;
+    }
+}
+
+function loadMetricTargets() {
+    try {
+        const rawTargets = window.localStorage.getItem(METRIC_TARGET_STORAGE_KEY);
+        if (!rawTargets) {
+            return { ...DEFAULT_METRIC_TARGETS };
+        }
+
+        const parsedTargets = JSON.parse(rawTargets);
+        return {
+            sleep: Number(parsedTargets.sleep) || DEFAULT_METRIC_TARGETS.sleep,
+            study: Number(parsedTargets.study) || DEFAULT_METRIC_TARGETS.study,
+            calories: Number(parsedTargets.calories) || DEFAULT_METRIC_TARGETS.calories,
+        };
+    } catch (error) {
+        return { ...DEFAULT_METRIC_TARGETS };
+    }
+}
+
+function saveMetricTargets() {
+    try {
+        window.localStorage.setItem(METRIC_TARGET_STORAGE_KEY, JSON.stringify(metricTargets));
+    } catch (error) {
+        // Ignore local storage issues.
+    }
+}
+
+function getMetricConfig(metricKey, summary = {}) {
+    const configs = {
+        sleep: {
+            key: "sleep",
+            label: "Sleep",
+            unit: "hrs",
+            tone: "sleep",
+            targetStep: 1,
+            minTarget: 1,
+            maxTarget: 24,
+            valueStep: 1,
+            rangeMin: 0,
+            rangeMax: 24,
+            summaryKey: "sleep_hours",
+        },
+        calories: {
+            key: "calories",
+            label: "Calories",
+            unit: "kcal",
+            tone: "calories",
+            targetStep: 50,
+            minTarget: 50,
+            maxTarget: 2000,
+            valueStep: 10,
+            rangeMin: 0,
+            rangeMax: Math.max(1000, (Number(summary.calories_burned) || 0) + 200, (Number(metricTargets.calories) || 0) + 200),
+            summaryKey: "calories_burned",
+        },
+        study: {
+            key: "study",
+            label: focusLabel,
+            unit: "hrs",
+            tone: "study",
+            targetStep: 1,
+            minTarget: 1,
+            maxTarget: 12,
+            valueStep: 1,
+            rangeMin: 0,
+            rangeMax: 12,
+            summaryKey: "study_hours",
+        },
+    };
+
+    return configs[metricKey];
+}
+
+function formatMetricValue(metricKey, value) {
+    const numericValue = Number(value) || 0;
+
+    if (metricKey === "calories") {
+        return String(Math.round(numericValue));
+    }
+
+    const roundedValue = Math.round(numericValue * 10) / 10;
+    return Number.isInteger(roundedValue) ? String(roundedValue) : roundedValue.toFixed(1);
+}
+
+function getMetricCurrentValue(metricKey, summary = {}) {
+    const config = getMetricConfig(metricKey, summary);
+    if (!config) {
+        return 0;
+    }
+
+    return Number(summary[config.summaryKey]) || 0;
+}
+
+function getMetricTargetValue(metricKey) {
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    const fallbackTarget = DEFAULT_METRIC_TARGETS[metricKey] || 1;
+    const storedTarget = Number(metricTargets[metricKey]);
+    const nextTarget = Number.isFinite(storedTarget) ? storedTarget : fallbackTarget;
+
+    return Math.max(config?.minTarget || 1, Math.min(nextTarget, config?.maxTarget || nextTarget));
+}
+
+function buildMetricPickerOptions(metricKey, currentValue, targetValue) {
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    if (!config) {
+        return [];
+    }
+
+    if (metricKey === "calories") {
+        return [];
+    }
+
+    const options = [];
+    for (let value = config.rangeMin; value <= config.rangeMax; value += config.valueStep) {
+        options.push(value);
+    }
+
+    if (!options.includes(currentValue)) {
+        options.push(currentValue);
+    }
+
+    if (!options.includes(targetValue)) {
+        options.push(targetValue);
+    }
+
+    return Array.from(new Set(options))
+        .map((value) => Number(value))
+        .sort((left, right) => left - right);
+}
+
+function createMetricPickerMarkup(metricKey, options, currentValue) {
+    return `
+        <div class="metric-value-picker" data-metric-picker="${metricKey}" tabindex="0" aria-label="${escapeHtml(metricKey)} current value selector">
+            ${options.map((option) => `
+                <button
+                    type="button"
+                    class="metric-picker-item ${Number(option) === Number(currentValue) ? "active" : ""}"
+                    data-picker-value="${escapeHtml(option)}"
+                    aria-selected="${Number(option) === Number(currentValue) ? "true" : "false"}"
+                >
+                    ${escapeHtml(formatMetricValue(metricKey, option))}
+                </button>
+            `).join("")}
+        </div>
+    `;
+}
+
+function getMetricIdPrefix(metricKey) {
+    return metricKey === "calories" ? "calorie" : metricKey;
+}
+
+function createMetricTargetControls(metricKey) {
+    return `
+        <div class="metric-adjust-controls">
+            <button type="button" class="adjust-btn" onclick="updateTarget('${metricKey}', 1)" aria-label="Increase ${escapeHtml(metricKey)} target">+</button>
+            <button type="button" class="adjust-btn" onclick="updateTarget('${metricKey}', -1)" aria-label="Decrease ${escapeHtml(metricKey)} target">-</button>
+        </div>
+    `;
+}
+
+function createInteractiveMetricCard(metricKey, summary = {}, delay = 0) {
+    const config = getMetricConfig(metricKey, summary);
+    const currentValue = getMetricCurrentValue(metricKey, summary);
+    const targetValue = getMetricTargetValue(metricKey);
+    const progressPercent = clampPercent((currentValue / targetValue) * 100);
+    const pickerOptions = buildMetricPickerOptions(metricKey, currentValue, targetValue);
+    const idPrefix = getMetricIdPrefix(metricKey);
+    const showPicker = metricKey !== "calories";
+
+    return `
+        <article class="metric-target-card tone-${config.tone}" data-metric-card="${metricKey}">
+            <div class="metric-card-head">
+                <div>
+                    <span class="metric-card-label">${metricKey === "study" ? `<span id="focusLabel">${escapeHtml(config.label)}</span>` : escapeHtml(config.label)}</span>
+                    <strong class="metric-card-value" data-metric-value="${metricKey}">
+                        <span id="${idPrefix}Current">${escapeHtml(formatMetricValue(metricKey, currentValue))}</span>
+                        /
+                        <span id="${idPrefix}Target">${escapeHtml(formatMetricValue(metricKey, targetValue))}</span>
+                        ${escapeHtml(config.unit)}
+                    </strong>
+                </div>
+            </div>
+            <div class="metric-card-body">
+                <div class="metric-ring-wrap">
+                    <div class="progress-ring ring-${config.tone}" data-progress="${progressPercent}" data-delay="${delay}">
+                        <div class="progress-ring-core">
+                            <strong data-ring-text="${metricKey}">${escapeHtml(formatMetricValue(metricKey, currentValue))} / ${escapeHtml(formatMetricValue(metricKey, targetValue))}</strong>
+                            <span>${escapeHtml(config.unit)}</span>
+                        </div>
+                    </div>
+                    ${createMetricTargetControls(metricKey)}
+                </div>
+                ${showPicker ? `
+                    <div class="metric-picker-panel">
+                        <span class="metric-picker-label">Current</span>
+                        ${createMetricPickerMarkup(metricKey, pickerOptions, currentValue)}
+                    </div>
+                ` : `
+                    <div class="metric-picker-panel metric-picker-panel-static">
+                        <span class="metric-picker-label">Current</span>
+                        <p class="metric-static-note">Auto from workout log</p>
+                    </div>
+                `}
+            </div>
+        </article>
+    `;
+}
+
+function createEnergyMetricCard(summary = {}, bars = {}) {
+    const energyPercent = bars.energy?.percent ?? summary.energy_percent ?? 0;
+
+    return `
+        <button type="button" class="metric-target-card energy-metric-card" data-open-energy-modal="true" aria-label="Open energy check">
+            <div class="metric-card-head">
+                <div>
+                    <span class="metric-card-label">Energy</span>
+                    <strong class="metric-card-value">${escapeHtml(energyPercent)}%</strong>
+                </div>
+            </div>
+            <div class="metric-card-body metric-card-body-compact">
+                <div class="progress-ring ring-energy" data-progress="${clampPercent(energyPercent)}" data-delay="360">
+                    <div class="progress-ring-core">
+                        <strong>${escapeHtml(energyPercent)}%</strong>
+                        <span>live</span>
+                    </div>
+                </div>
+                <p class="metric-energy-note">Open the energy check to refresh your score.</p>
+            </div>
+        </button>
+    `;
+}
+
+function setMetricSummaryValue(metricKey, value) {
+    if (!dashboardState?.summary) {
         return;
     }
 
-    aiSuggestionsList.innerHTML = suggestions.map((suggestion) => `
-        <article class="suggestion-chip">
-            <span class="suggestion-dot"></span>
-            <p>${suggestion}</p>
-        </article>
-    `).join("");
+    if (metricKey === "sleep") {
+        dashboardState.summary.sleep_hours = Number(value);
+    } else if (metricKey === "study") {
+        dashboardState.summary.study_hours = Number(value);
+    } else if (metricKey === "calories") {
+        dashboardState.summary.calories_burned = Number(value);
+    }
 }
 
-function renderProgressGrid(metrics, summary = {}) {
+function animateRingTo(ring, targetPercent, delay = 0, duration = 420) {
+    if (!ring) {
+        return;
+    }
+
+    const startTime = performance.now() + delay;
+    const currentProgress = parseFloat(String(ring.style.getPropertyValue("--progress") || "0").replace("%", "")) || 0;
+    const startValue = currentProgress;
+    const finalValue = clampPercent(targetPercent);
+
+    if (ring._progressAnimationFrame) {
+        window.cancelAnimationFrame(ring._progressAnimationFrame);
+    }
+
+    function tick(now) {
+        if (now < startTime) {
+            ring._progressAnimationFrame = window.requestAnimationFrame(tick);
+            return;
+        }
+
+        const elapsed = Math.min((now - startTime) / duration, 1);
+        const eased = 1 - Math.pow(1 - elapsed, 3);
+        const nextValue = startValue + ((finalValue - startValue) * eased);
+        ring.style.setProperty("--progress", `${nextValue}%`);
+
+        if (elapsed < 1) {
+            ring._progressAnimationFrame = window.requestAnimationFrame(tick);
+        }
+    }
+
+    ring._progressAnimationFrame = window.requestAnimationFrame(tick);
+}
+
+function updateMetricCardDisplay(metricKey) {
+    if (!dashboardState?.summary || !progressGrid) {
+        return;
+    }
+
+    const config = getMetricConfig(metricKey, dashboardState.summary);
+    const currentValue = getMetricCurrentValue(metricKey, dashboardState.summary);
+    const targetValue = getMetricTargetValue(metricKey);
+    const progressPercent = clampPercent((currentValue / targetValue) * 100);
+    const metricCard = progressGrid.querySelector(`[data-metric-card="${metricKey}"]`);
+    const idPrefix = getMetricIdPrefix(metricKey);
+
+    if (!metricCard) {
+        return;
+    }
+
+    const valueLabel = metricCard.querySelector(`[data-metric-value="${metricKey}"]`);
+    const ringText = metricCard.querySelector(`[data-ring-text="${metricKey}"]`);
+    const ring = metricCard.querySelector(".progress-ring");
+    const currentText = document.getElementById(`${idPrefix}Current`);
+    const targetText = document.getElementById(`${idPrefix}Target`);
+
+    if (currentText) {
+        currentText.textContent = formatMetricValue(metricKey, currentValue);
+    }
+
+    if (targetText) {
+        targetText.textContent = formatMetricValue(metricKey, targetValue);
+    }
+
+    if (valueLabel) {
+        valueLabel.innerHTML = `
+            <span id="${idPrefix}Current">${escapeHtml(formatMetricValue(metricKey, currentValue))}</span>
+            /
+            <span id="${idPrefix}Target">${escapeHtml(formatMetricValue(metricKey, targetValue))}</span>
+            ${escapeHtml(config.unit)}
+        `;
+    }
+
+    if (ringText) {
+        ringText.textContent = `${formatMetricValue(metricKey, currentValue)} / ${formatMetricValue(metricKey, targetValue)}`;
+    }
+
+    if (ring) {
+        ring.dataset.progress = String(progressPercent);
+        animateRingTo(ring, progressPercent);
+    }
+}
+
+function applyMetricPickerItemState(item, offset) {
+    const distance = Math.abs(offset);
+    const isActive = offset === 0;
+    const isVisible = distance <= 2;
+    const translateY = offset * 34;
+    const scale = isActive ? 1.08 : distance === 1 ? 0.95 : 0.88;
+    const opacity = isActive ? 1 : distance === 1 ? 0.54 : distance === 2 ? 0.2 : 0;
+
+    item.classList.toggle("active", isActive);
+    item.classList.toggle("is-visible", isVisible);
+    item.setAttribute("aria-selected", isActive ? "true" : "false");
+    item.tabIndex = isActive ? 0 : -1;
+    item.style.transform = `translateY(${translateY}px) scale(${scale})`;
+    item.style.opacity = String(opacity);
+    item.style.pointerEvents = isVisible ? "auto" : "none";
+}
+
+function getPickerWrappedOffset(index, activeIndex, totalItems) {
+    let offset = index - activeIndex;
+    const half = Math.floor(totalItems / 2);
+
+    if (offset > half) {
+        offset -= totalItems;
+    } else if (offset < -half) {
+        offset += totalItems;
+    }
+
+    return offset;
+}
+
+function updateMetricPicker(metricKey, nextIndex, { persist = true, focusActive = false, syncSummary = true } = {}) {
+    const pickerState = metricPickerStates.get(metricKey);
+    if (!pickerState || !pickerState.items.length) {
+        return;
+    }
+
+    pickerState.index = (nextIndex + pickerState.items.length) % pickerState.items.length;
+    const nextValue = Number(pickerState.items[pickerState.index].dataset.pickerValue);
+
+    pickerState.items.forEach((item, index) => {
+        const offset = getPickerWrappedOffset(index, pickerState.index, pickerState.items.length);
+        applyMetricPickerItemState(item, offset);
+    });
+
+    if (focusActive) {
+        pickerState.items[pickerState.index].focus({ preventScroll: true });
+    }
+
+    if (syncSummary) {
+        setMetricSummaryValue(metricKey, nextValue);
+        updateMetricCardDisplay(metricKey);
+    }
+
+    if (persist) {
+        queueMetricSave(metricKey, nextValue);
+    }
+}
+
+function hydrateMetricPickers(summary = {}) {
+    metricPickerStates.clear();
+
+    progressGrid?.querySelectorAll("[data-metric-picker]").forEach((picker) => {
+        const metricKey = picker.dataset.metricPicker;
+        const items = Array.from(picker.querySelectorAll(".metric-picker-item"));
+        const currentValue = getMetricCurrentValue(metricKey, summary);
+        const activeIndex = Math.max(items.findIndex((item) => Number(item.dataset.pickerValue) === Number(currentValue)), 0);
+
+        metricPickerStates.set(metricKey, { picker, items, index: activeIndex });
+        updateMetricPicker(metricKey, activeIndex, { persist: false, focusActive: false, syncSummary: false });
+    });
+}
+
+function queueMetricSave(metricKey, value) {
+    const existingTimer = metricSaveTimers.get(metricKey);
+    if (existingTimer) {
+        window.clearTimeout(existingTimer);
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+        try {
+            if (metricKey === "study") {
+                const response = await fetch("/update_study", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "edit", value }),
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not update study hours.");
+                }
+
+                renderDashboard(data.dashboard_state);
+            } else {
+                const response = await fetch("/update_day_metric", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ metric: metricKey, value }),
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not update that metric.");
+                }
+
+                renderDashboard(data.dashboard_state);
+            }
+        } catch (error) {
+            setDashboardFeedback(error.message || "Could not save that metric.", true);
+            refreshDashboardState(false);
+        }
+    }, 260);
+
+    metricSaveTimers.set(metricKey, timeoutId);
+}
+
+function updateTarget(metricKey, change) {
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    let nextTarget = getMetricTargetValue(metricKey);
+
+    if (metricKey === "sleep") {
+        nextTarget += change;
+        if (nextTarget < 1) {
+            nextTarget = 1;
+        }
+    } else if (metricKey === "study") {
+        nextTarget += change;
+        if (nextTarget < 1) {
+            nextTarget = 1;
+        }
+    } else if (metricKey === "calories") {
+        nextTarget += change * 50;
+        if (nextTarget < 100) {
+            nextTarget = 100;
+        }
+    } else {
+        return;
+    }
+
+    nextTarget = Math.min(nextTarget, config.maxTarget);
+
+    metricTargets = {
+        ...metricTargets,
+        [metricKey]: Number(nextTarget),
+    };
+    saveMetricTargets();
+    updateMetricCardDisplay(metricKey);
+}
+
+window.updateTarget = updateTarget;
+
+function renderProgressGrid(metrics, summary = {}, bars = {}) {
     if (!progressGrid) {
         return;
     }
 
-    const metricMap = getMetricMap(metrics);
-    const caloriesMetric = metricMap.calories || {
-        percent: 0,
-        value: "0 / 400 kcal",
-    };
-    const studyMetric = metricMap.study || {
-        percent: 0,
-        value: "0 / 4 hrs",
-    };
-
-    progressGrid.innerHTML = [
-        createExerciseCaloriesCard(caloriesMetric, summary),
-        createStudyCard(studyMetric, summary),
-    ].join("");
-    animateRings();
-}
-
-function renderVitalBars(bars) {
-    if (!vitalBars) {
-        return;
-    }
-
-    if (!bars?.sleep || !bars?.energy) {
-        vitalBars.innerHTML = "";
-        return;
-    }
-
-    vitalBars.innerHTML = `
-        ${createVitalBar("sleep", bars.sleep)}
-        ${createVitalBar("energy", bars.energy)}
+    progressGrid.innerHTML = `
+        <article class="metrics-compact-card metrics-interactive-card">
+            <div class="metrics-ring-grid metrics-interactive-grid">
+                ${createInteractiveMetricCard("sleep", summary, 0)}
+                ${createInteractiveMetricCard("calories", summary, 120)}
+                ${createInteractiveMetricCard("study", summary, 240)}
+                ${createEnergyMetricCard(summary, bars)}
+            </div>
+        </article>
     `;
-    animateVitalBars();
+
+    hydrateMetricPickers(summary);
+    syncFocusLabel(focusLabel);
 }
 
 function createDailyTaskCard(task) {
     return `
-        <label class="task-tile ${task.completed ? "done" : ""}">
-            <div class="task-tile-head">
-                <div class="task-title-stack">
-                    <p class="task-tile-title">${task.name}</p>
-                    <span class="task-priority-badge priority-${(task.priority || "Medium").toLowerCase()}">${task.priority || "Medium"} Priority</span>
-                </div>
-                <input class="task-tile-toggle" type="checkbox" data-task-type="daily" data-task-name="${task.name}" ${task.completed ? "checked" : ""}>
-            </div>
-            <p class="task-tile-text">${task.completed ? "Completed and saved to today's progress." : "Open task for today's focus grid."}</p>
+        <label class="task-tile task-compact-item ${task.completed ? "done" : ""}">
+            <input class="task-tile-toggle compact-task-toggle" type="checkbox" data-task-type="daily" data-task-name="${escapeHtml(task.name)}" ${task.completed ? "checked" : ""}>
+            <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
         </label>
     `;
 }
 
 function createLongTermTaskCard(task) {
     return `
-        <label class="task-tile long-term-tile ${task.completed ? "done" : ""}">
-            <div class="task-tile-head">
-                <div class="task-title-stack">
-                    <p class="task-tile-title">${task.name}</p>
-                    <div class="task-pill-row">
-                        <span class="task-priority-badge priority-${(task.priority || "Medium").toLowerCase()}">${task.priority || "Medium"} Priority</span>
-                        <span class="task-streak-badge">🔥 ${task.streak_count || 0}</span>
-                    </div>
-                </div>
-                <input class="task-tile-toggle" type="checkbox" data-task-type="long_term" data-task-id="${task.id}" data-task-name="${task.name}" ${task.completed ? "checked" : ""}>
-            </div>
-            <p class="task-tile-text">${task.completed ? "Completed today. Keep the streak alive tomorrow." : "Persistent goal tracked across days."}</p>
+        <label class="task-tile task-compact-item long-term-tile ${task.completed ? "done" : ""}">
+            <input class="task-tile-toggle compact-task-toggle" type="checkbox" data-task-type="long_term" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" ${task.completed ? "checked" : ""}>
+            <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
+            <span class="task-streak-inline">&#128293; ${task.streak_count || 0} day${task.streak_count === 1 ? "" : "s"}</span>
         </label>
     `;
 }
@@ -300,34 +950,30 @@ function renderTaskLists(dailyTasks = [], longTermTasks = []) {
 
     if (taskProgressMeta) {
         taskProgressMeta.textContent = dailyTasks.length
-            ? `${completedTasks} of ${dailyTasks.length} daily tasks completed.`
-            : "Use + Add Task to build today's checklist anytime.";
+            ? `${completedTasks}/${dailyTasks.length} done`
+            : "";
     }
 
     if (dailyTaskMeta) {
         dailyTaskMeta.textContent = dailyTasks.length
-            ? `${completedTasks} completed, ${dailyTasks.length - completedTasks} left today.`
-            : "No daily tasks yet.";
+            ? `${dailyTasks.length - completedTasks} left`
+            : "";
     }
 
     if (longTermTaskMeta) {
         const activeStreaks = longTermTasks.filter((task) => (task.streak_count || 0) > 0).length;
         longTermTaskMeta.textContent = longTermTasks.length
-            ? `${longTermTasks.length} goals tracked, ${activeStreaks} with an active streak.`
-            : "Add a long-term goal to start a streak.";
+            ? `${activeStreaks} active`
+            : "";
     }
 
     dailyTaskList.innerHTML = dailyTasks.length
         ? dailyTasks.map((task) => createDailyTaskCard(task)).join("")
-        : '<p class="setup-empty">No tasks available for today.</p>';
+        : '<p class="setup-empty">No tasks yet.</p>';
 
     longTermTaskList.innerHTML = longTermTasks.length
         ? longTermTasks.map((task) => createLongTermTaskCard(task)).join("")
-        : '<p class="setup-empty">No long-term goals added yet.</p>';
-}
-
-function renderEnergyStatus(energyCheck) {
-    return;
+        : '<p class="setup-empty">No goals yet.</p>';
 }
 
 function renderHealthInsight(health) {
@@ -346,25 +992,41 @@ function renderHealthInsight(health) {
     if (!health) {
         healthInsightResult.innerHTML = `
             <article class="health-insight-card empty">
-                <p>Enter height and weight to calculate BMI and your ideal weight range.</p>
+                <p>Enter height and weight to see your BMI and a quick health tip.</p>
             </article>
         `;
         return;
     }
+
+    const categoryClass = String(health.category || "").toLowerCase().replace(/\s+/g, "-");
+    const shortTip = health.short_tip || health.calorie_guidance || "Tip: Stay consistent with healthy habits";
 
     healthInsightResult.innerHTML = `
         <article class="health-insight-card">
             <div class="health-stat">
                 <span class="health-label">BMI</span>
                 <strong>${health.bmi}</strong>
-                <span class="health-category">${health.category}</span>
             </div>
             <div class="health-range">
-                <span class="health-label">Ideal Weight</span>
-                <strong>${health.ideal_weight_min} - ${health.ideal_weight_max} kg</strong>
+                <span class="health-label">Category</span>
+                <span class="health-category ${escapeHtml(categoryClass)}">${escapeHtml(health.category)}</span>
             </div>
+            <p class="health-tip-line">${escapeHtml(shortTip)}</p>
         </article>
     `;
+}
+
+function renderOverviewCards(state) {
+    const summary = state?.summary || {};
+    const totalTasks = summary.total_tasks ?? 0;
+    const completedTasks = summary.completed_tasks ?? 0;
+    const pendingTasks = summary.pending_tasks ?? Math.max(totalTasks - completedTasks, 0);
+
+    if (dashboardHeroText) {
+        dashboardHeroText.textContent = pendingTasks
+            ? `${pendingTasks} task${pendingTasks === 1 ? "" : "s"} open today.`
+            : "Tasks are clear for today.";
+    }
 }
 
 function broadcastDashboardUpdate(state) {
@@ -377,51 +1039,32 @@ function renderDashboard(state) {
     }
 
     dashboardState = state;
-    renderSuggestions(state.suggestions || []);
-    renderProgressGrid(state.metrics || [], state.summary || {});
+    syncFocusLabel(state.focus_label || focusLabel);
+    renderSuggestions(state.suggestions || [], state);
+    renderProgressGrid(state.metrics || [], state.summary || {}, state.bars || {});
     renderMotivationCard(state.entry_date || "");
-    renderVitalBars(state.bars || {});
     renderTaskLists(state.daily_tasks || state.tasks || [], state.long_term_tasks || []);
     renderHealthInsight(state.health || null);
+    renderOverviewCards(state);
     broadcastDashboardUpdate(state);
+    window.requestAnimationFrame(() => animateRings());
 }
 
 function animateRing(ring) {
     const target = Number(ring.dataset.progress || 0);
     const delay = Number(ring.dataset.delay || 0);
-    const start = performance.now() + delay;
-    const duration = 900;
+    const hasAnimated = ring.dataset.animated === "true";
 
-    function tick(now) {
-        if (now < start) {
-            requestAnimationFrame(tick);
-            return;
-        }
-
-        const elapsed = Math.min((now - start) / duration, 1);
-        const eased = 1 - Math.pow(1 - elapsed, 3);
-        ring.style.setProperty("--progress", `${Math.round(target * eased)}%`);
-
-        if (elapsed < 1) {
-            requestAnimationFrame(tick);
-        }
+    if (!hasAnimated) {
+        ring.style.setProperty("--progress", "0%");
     }
 
-    ring.style.setProperty("--progress", "0%");
-    requestAnimationFrame(tick);
+    animateRingTo(ring, target, delay, hasAnimated ? 420 : 900);
+    ring.dataset.animated = "true";
 }
 
 function animateRings() {
     document.querySelectorAll(".progress-ring").forEach((ring) => animateRing(ring));
-}
-
-function animateVitalBars() {
-    document.querySelectorAll("[data-bar-fill]").forEach((fill) => {
-        fill.style.height = "0%";
-        window.setTimeout(() => {
-            fill.style.height = `${fill.dataset.percent}%`;
-        }, 80);
-    });
 }
 
 function renderEnergyQuestions() {
@@ -501,42 +1144,6 @@ async function refreshDashboardState(showMessage = true) {
     }
 }
 
-async function handleStudyAction(action, value = null) {
-    setDashboardFeedback("Updating study hours...");
-
-    try {
-        const response = await fetch("/update_study", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action, value })
-        });
-        const data = await response.json();
-
-        if (!response.ok) {
-            setDashboardFeedback(data.error || "Could not update study hours.", true);
-            return;
-        }
-
-        renderDashboard(data.dashboard_state);
-        setDashboardFeedback("Study hours updated.");
-    } catch (error) {
-        setDashboardFeedback("Could not reach the server. Please try again.", true);
-    }
-}
-
-function toggleTaskComposer(forceOpen = null) {
-    if (!quickTaskForm) {
-        return;
-    }
-
-    const shouldOpen = forceOpen === null ? quickTaskForm.classList.contains("hidden-form") : forceOpen;
-    quickTaskForm.classList.toggle("hidden-form", !shouldOpen);
-
-    if (shouldOpen && quickTaskInput) {
-        quickTaskInput.focus();
-    }
-}
-
 async function handleQuickTaskSubmit(event) {
     event.preventDefault();
 
@@ -575,51 +1182,7 @@ async function handleQuickTaskSubmit(event) {
         }
 
         renderDashboard(data.dashboard_state);
-        toggleTaskComposer(false);
         setDashboardFeedback(type === "long_term" ? "Long-term goal added." : "Task added to today.");
-    } catch (error) {
-        setDashboardFeedback("Could not reach the server. Please try again.", true);
-    }
-}
-
-async function handleMetricEdit(metricKey) {
-    if (!dashboardState) {
-        return;
-    }
-
-    const prompts = {
-        sleep: { label: "sleep hours", placeholder: String(dashboardState.summary?.sleep_hours ?? 0) },
-        energy: { label: "energy level (0-100)", placeholder: String(dashboardState.summary?.energy_percent ?? 0) },
-        calories: { label: "calories burned", placeholder: String(dashboardState.summary?.calories_burned ?? 0) },
-    };
-
-    const config = prompts[metricKey];
-    if (!config) {
-        return;
-    }
-
-    const nextValue = window.prompt(`Enter updated ${config.label}:`, config.placeholder);
-    if (nextValue === null) {
-        return;
-    }
-
-    setDashboardFeedback(`Updating ${config.label}...`);
-
-    try {
-        const response = await fetch("/update_day_metric", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ metric: metricKey, value: nextValue }),
-        });
-        const data = await response.json();
-
-        if (!response.ok) {
-            setDashboardFeedback(data.error || "Could not update that metric.", true);
-            return;
-        }
-
-        renderDashboard(data.dashboard_state);
-        setDashboardFeedback("Daily metric updated.");
     } catch (error) {
         setDashboardFeedback("Could not reach the server. Please try again.", true);
     }
@@ -928,6 +1491,12 @@ async function sendChatMessage(event) {
 
 window.personalAiDashboard = {
     getDashboardState: () => dashboardState,
+    setFocusLabel: (nextLabel) => {
+        syncFocusLabel(nextLabel);
+        if (dashboardState) {
+            renderDashboard(dashboardState);
+        }
+    },
     refreshDashboardState,
     renderDashboard,
     setDashboardFeedback,
@@ -936,18 +1505,70 @@ window.personalAiDashboard = {
 
 if (progressGrid) {
     progressGrid.addEventListener("click", (event) => {
-        const metricButton = event.target.closest("[data-metric-key]");
-        if (metricButton) {
-            handleMetricEdit(metricButton.dataset.metricKey);
+        const pickerItem = event.target.closest(".metric-picker-item");
+        if (pickerItem) {
+            const picker = pickerItem.closest("[data-metric-picker]");
+            if (!picker) {
+                return;
+            }
+
+            const metricKey = picker.dataset.metricPicker;
+            const pickerState = metricPickerStates.get(metricKey);
+            if (!pickerState) {
+                return;
+            }
+
+            const nextIndex = pickerState.items.findIndex((item) => item === pickerItem);
+            if (nextIndex >= 0) {
+                updateMetricPicker(metricKey, nextIndex, { focusActive: true });
+            }
             return;
         }
 
-        const button = event.target.closest("[data-study-action]");
-        if (!button) {
+        const energyTrigger = event.target.closest("[data-open-energy-modal]");
+        if (energyTrigger) {
+            openEnergyModal();
+        }
+    });
+
+    progressGrid.addEventListener("wheel", (event) => {
+        const picker = event.target.closest("[data-metric-picker]");
+        if (!picker) {
             return;
         }
 
-        handleStudyAction(button.dataset.studyAction, null);
+        event.preventDefault();
+        const metricKey = picker.dataset.metricPicker;
+        const pickerState = metricPickerStates.get(metricKey);
+        if (!pickerState) {
+            return;
+        }
+
+        updateMetricPicker(metricKey, pickerState.index + (event.deltaY > 0 ? 1 : -1));
+    }, { passive: false });
+
+    progressGrid.addEventListener("keydown", (event) => {
+        const picker = event.target.closest("[data-metric-picker]");
+        if (!picker) {
+            return;
+        }
+
+        const metricKey = picker.dataset.metricPicker;
+        const pickerState = metricPickerStates.get(metricKey);
+        if (!pickerState) {
+            return;
+        }
+
+        if (event.key === "ArrowDown") {
+            event.preventDefault();
+            updateMetricPicker(metricKey, pickerState.index + 1, { focusActive: true });
+            return;
+        }
+
+        if (event.key === "ArrowUp") {
+            event.preventDefault();
+            updateMetricPicker(metricKey, pickerState.index - 1, { focusActive: true });
+        }
     });
 }
 
@@ -967,20 +1588,37 @@ if (resetDayButton) {
     resetDayButton.addEventListener("click", handleResetDay);
 }
 
-if (vitalBars) {
-    vitalBars.addEventListener("click", (event) => {
-        const metricButton = event.target.closest("[data-metric-key]");
-        if (metricButton) {
-            handleMetricEdit(metricButton.dataset.metricKey);
+if (guidancePrevButton) {
+    guidancePrevButton.addEventListener("click", () => {
+        showGuidanceTip(currentGuidanceIndex - 1);
+        resetGuidanceTimer();
+    });
+}
+
+if (guidanceNextButton) {
+    guidanceNextButton.addEventListener("click", () => {
+        showGuidanceTip(currentGuidanceIndex + 1);
+        resetGuidanceTimer();
+    });
+}
+
+if (aiSuggestionsList) {
+    aiSuggestionsList.addEventListener("click", (event) => {
+        const dot = event.target.closest("[data-guidance-index]");
+        if (!dot) {
             return;
         }
 
-        const button = event.target.closest("#openEnergyModal");
-        if (!button) {
-            return;
-        }
+        showGuidanceTip(Number(dot.dataset.guidanceIndex));
+        resetGuidanceTimer();
+    });
+}
 
-        openEnergyModal();
+if (toggleInsightsButton && insightsBody) {
+    toggleInsightsButton.addEventListener("click", () => {
+        const isHidden = insightsBody.classList.toggle("hidden-panel");
+        toggleInsightsButton.setAttribute("aria-expanded", isHidden ? "false" : "true");
+        toggleInsightsButton.textContent = isHidden ? "Expand" : "Collapse";
     });
 }
 
@@ -1019,19 +1657,45 @@ if (chatForm) {
     chatForm.addEventListener("submit", sendChatMessage);
 }
 
-if (toggleTaskComposerButton) {
-    toggleTaskComposerButton.addEventListener("click", () => {
-        toggleTaskComposer();
-        setDashboardFeedback("");
-    });
-}
-
 if (quickTaskForm) {
     quickTaskForm.addEventListener("submit", handleQuickTaskSubmit);
 }
 
 if (healthForm) {
     healthForm.addEventListener("submit", handleHealthSubmit);
+}
+
+if (supportButton && supportPanel) {
+    supportButton.addEventListener("click", () => {
+        clearSupportHideTimer();
+        setSupportPanelOpen(!supportPanel.classList.contains("show"));
+    });
+
+    supportButton.addEventListener("mouseenter", () => {
+        clearSupportHideTimer();
+        setSupportPanelOpen(true);
+    });
+
+    supportButton.addEventListener("mouseleave", () => {
+        queueSupportHide();
+    });
+
+    supportPanel.addEventListener("mouseenter", () => {
+        clearSupportHideTimer();
+        setSupportPanelOpen(true);
+    });
+
+    supportPanel.addEventListener("mouseleave", () => {
+        setSupportPanelOpen(false);
+    });
+
+    document.addEventListener("click", (event) => {
+        if (supportButton.contains(event.target) || supportPanel.contains(event.target)) {
+            return;
+        }
+
+        setSupportPanelOpen(false);
+    });
 }
 
 chatSuggestions.forEach((button) => {
