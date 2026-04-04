@@ -44,6 +44,11 @@ const insightsBody = document.getElementById("insightsBody");
 const dashboardHeroText = document.getElementById("dashboardHeroText");
 const supportButton = document.getElementById("supportButton");
 const supportPanel = document.getElementById("supportPanel");
+const dashboardPage = document.getElementById("dashboardPage");
+const activityPage = document.getElementById("activityPage");
+const dashboardTab = document.getElementById("dashboardTab");
+const activityTab = document.getElementById("activityTab");
+const aiModal = document.getElementById("aiModal");
 
 const energyQuestions = [
     "How many hours did you sleep?",
@@ -100,6 +105,46 @@ function setDashboardFeedback(message, isError = false) {
 
     dashboardFeedback.textContent = message;
     dashboardFeedback.classList.toggle("error", isError);
+}
+
+function setAiModalOpen(isOpen) {
+    if (!aiModal) {
+        return;
+    }
+
+    aiModal.classList.toggle("hidden", !isOpen);
+    aiModal.setAttribute("aria-hidden", isOpen ? "false" : "true");
+    document.body.classList.toggle("ai-modal-open", isOpen);
+}
+
+function setActiveNav(page) {
+    dashboardTab?.classList.toggle("active", page === "dashboard");
+    activityTab?.classList.toggle("active", page === "activity");
+}
+
+function showPage(page = "dashboard") {
+    const isDashboard = page === "dashboard";
+
+    if (dashboardPage) {
+        dashboardPage.style.display = isDashboard ? "grid" : "none";
+        dashboardPage.classList.toggle("active-page", isDashboard);
+    }
+
+    if (activityPage) {
+        activityPage.style.display = isDashboard ? "none" : "grid";
+        activityPage.classList.toggle("active-page", !isDashboard);
+    }
+
+    setActiveNav(isDashboard ? "dashboard" : "activity");
+}
+
+function openAI() {
+    setAiModalOpen(true);
+    setChatOpen(true);
+}
+
+function closeAI() {
+    setChatOpen(false);
 }
 
 function setSupportPanelOpen(isOpen) {
@@ -1360,13 +1405,14 @@ function appendChatMessage(role, text, extraClass = "") {
 }
 
 function setChatOpen(isOpen) {
-    if (!chatWidget || !chatToggle) {
+    if (!chatWidget) {
         return;
     }
 
     chatWidget.classList.toggle("hidden", !isOpen);
     chatShell?.classList.toggle("chat-open", isOpen);
-    chatToggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    chatToggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+    setAiModalOpen(isOpen);
 
     if (isOpen && chatInput) {
         window.setTimeout(() => {
@@ -1501,7 +1547,14 @@ window.personalAiDashboard = {
     renderDashboard,
     setDashboardFeedback,
     closeEnergyModal,
+    showPage,
+    openAI,
+    closeAI,
 };
+
+window.showPage = showPage;
+window.openAI = openAI;
+window.closeAI = closeAI;
 
 if (progressGrid) {
     progressGrid.addEventListener("click", (event) => {
@@ -1698,6 +1751,17 @@ if (supportButton && supportPanel) {
     });
 }
 
+document.querySelectorAll(".bottom-nav .nav-item").forEach((item) => {
+    item.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") {
+            return;
+        }
+
+        event.preventDefault();
+        item.click();
+    });
+});
+
 chatSuggestions.forEach((button) => {
     button.addEventListener("click", async () => {
         const quickMessage = button.dataset.chatQuestion || button.textContent.trim();
@@ -1709,6 +1773,8 @@ chatSuggestions.forEach((button) => {
         await submitChatMessage(button.dataset.chatQuestion || "");
     });
 });
+
+showPage("dashboard");
 
 if (dashboardState) {
     renderDashboard(dashboardState);

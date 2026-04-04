@@ -5,11 +5,15 @@
     const infoButton = document.getElementById("infoButton");
     const infoModal = document.getElementById("infoModal");
     const energyModal = document.getElementById("energyModal");
+    const aiModal = document.getElementById("aiModal");
 
     function syncChatShellState() {
         const isOpen = Boolean(chatWidget && !chatWidget.classList.contains("hidden"));
         chatShell?.classList.toggle("chat-open", isOpen);
         chatToggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
+        aiModal?.classList.toggle("hidden", !isOpen);
+        aiModal?.setAttribute("aria-hidden", isOpen ? "false" : "true");
+        document.body.classList.toggle("ai-modal-open", isOpen);
     }
 
     function decorateWelcomeBubble() {
@@ -63,10 +67,8 @@
             return;
         }
 
-        if (chatWidget && !chatWidget.classList.contains("hidden")) {
-            chatWidget.classList.add("hidden");
-            chatShell?.classList.remove("chat-open");
-            chatToggle?.setAttribute("aria-expanded", "false");
+        if (aiModal && !aiModal.classList.contains("hidden")) {
+            window.personalAiDashboard?.closeAI?.();
         }
     });
 
