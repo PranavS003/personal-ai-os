@@ -26,9 +26,19 @@
                                 <p id="dashboardHeroText" class="hero-text">Your day at a glance.</p>
                             </div>
                             <div class="workspace-actions mobile-workspace-actions">
-                                <button id="refreshDashboard" type="button" class="ghost-button">Refresh Dashboard</button>
                                 <button id="resetDay" type="button" class="ghost-button danger-button">Reset Day</button>
-                                <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+                                <form action="{{ url_for('logout') }}" method="post" class="header-action-form">
+                                    <button type="submit" class="ghost-button logout-button">Logout</button>
+                                </form>
+                                <div class="support-container">
+                                    <button type="button" id="supportButton" class="ghost-button support-btn" aria-expanded="false" aria-controls="supportPanel">
+                                        Support
+                                    </button>
+                                    <div id="supportPanel" class="support-panel" aria-hidden="true">
+                                        <p><span class="support-icon" aria-hidden="true">&#9993;</span> pranavsajith003@gmail.com</p>
+                                        <p><span class="support-icon" aria-hidden="true">&#9742;</span> 9074359676</p>
+                                    </div>
+                                </div>
                             </div>
                         </header>
                     </div>
@@ -381,16 +391,6 @@
             </div>
         </div>
     </section>
-
-    <div class="support-container">
-        <button type="button" id="supportButton" class="support-btn" aria-expanded="false" aria-controls="supportPanel">
-            Support
-        </button>
-        <div id="supportPanel" class="support-panel" aria-hidden="true">
-            <p><span class="support-icon" aria-hidden="true">&#9993;</span> pranavsajith003@gmail.com</p>
-            <p><span class="support-icon" aria-hidden="true">&#9742;</span> 9074359676</p>
-        </div>
-    </div>
 
     <script>
         window.dashboardState = {{ dashboard_state|tojson }};

@@ -1785,8 +1785,12 @@ def register():
     return safe_render_template("register.html", error=None, form_data={"username": "", "email": ""})
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
+    current_user = get_current_user() or "guest"
+    chat_session_id = session.get("chat_session_id")
+    if chat_session_id:
+        CHAT_SESSIONS.pop(f"{current_user}:{chat_session_id}", None)
     session.clear()
     return redirect(url_for("login"))
 

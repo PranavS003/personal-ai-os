@@ -7223,3 +7223,116 @@ body.ai-modal-open .ai-widget {
         flex-direction: column;
     }
 }
+
+/* Header action cleanup */
+
+.modern-dashboard-page .dashboard-hero-panel {
+    align-items: center;
+}
+
+.modern-dashboard-page .workspace-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 12px;
+    margin-left: auto;
+}
+
+.modern-dashboard-page .header-action-form {
+    display: flex;
+    margin: 0;
+}
+
+.modern-dashboard-page .workspace-actions .ghost-button,
+.modern-dashboard-page .workspace-actions .logout-button,
+.modern-dashboard-page .workspace-actions .logout-link,
+.modern-dashboard-page .workspace-actions .support-btn {
+    min-width: 118px;
+    min-height: 44px;
+    padding: 0 18px;
+    border-radius: 999px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.modern-dashboard-page .dashboard-hero-panel .ghost-button,
+.modern-dashboard-page .dashboard-hero-panel .logout-button,
+.modern-dashboard-page .dashboard-hero-panel .support-btn {
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.16);
+    color: #ffffff;
+    box-shadow: none;
+}
+
+.modern-dashboard-page .dashboard-hero-panel .ghost-button:hover,
+.modern-dashboard-page .dashboard-hero-panel .logout-button:hover,
+.modern-dashboard-page .dashboard-hero-panel .support-btn:hover,
+.modern-dashboard-page .dashboard-hero-panel .ghost-button:focus-visible,
+.modern-dashboard-page .dashboard-hero-panel .logout-button:focus-visible,
+.modern-dashboard-page .dashboard-hero-panel .support-btn:focus-visible {
+    background: rgba(255, 255, 255, 0.24);
+    outline: none;
+}
+
+.modern-dashboard-page .support-container {
+    position: relative;
+    top: auto;
+    right: auto;
+    z-index: 30;
+    display: flex;
+    justify-items: stretch;
+}
+
+.modern-dashboard-page .support-panel {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    margin-top: 0;
+    min-width: 232px;
+}
+
+@media (max-width: 980px) {
+    .modern-dashboard-page .dashboard-hero-panel {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modern-dashboard-page .workspace-actions {
+        justify-content: flex-end;
+        margin-left: auto;
+    }
+}
+
+@media (max-width: 760px) {
+    .modern-dashboard-page .dashboard-hero-panel {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .modern-dashboard-page .workspace-actions {
+        flex-direction: row;
+        flex-wrap: nowrap;
+        justify-content: flex-end;
+        align-items: center;
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    .modern-dashboard-page .workspace-actions .ghost-button,
+    .modern-dashboard-page .workspace-actions .logout-button,
+    .modern-dashboard-page .workspace-actions .logout-link,
+    .modern-dashboard-page .workspace-actions .support-btn {
+        width: auto;
+    }
+
+    .modern-dashboard-page .support-panel {
+        right: 0;
+        left: auto;
+        min-width: 210px;
+    }
+}
