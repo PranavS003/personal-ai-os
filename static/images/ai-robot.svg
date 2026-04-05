@@ -1,0 +1,26 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="robot-bg" x1="18" y1="12" x2="76" y2="84" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2563EB"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <linearGradient id="robot-face" x1="30" y1="24" x2="68" y2="72" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F8FBFF"/>
+      <stop offset="1" stop-color="#DCEEFF"/>
+    </linearGradient>
+  </defs>
+  <circle cx="48" cy="48" r="44" fill="url(#robot-bg)"/>
+  <rect x="30" y="24" width="36" height="34" rx="12" fill="url(#robot-face)"/>
+  <rect x="41" y="15" width="14" height="8" rx="4" fill="#A5D8FF"/>
+  <rect x="45" y="11" width="6" height="8" rx="3" fill="#0F172A"/>
+  <circle cx="40.5" cy="41" r="5.5" fill="#0F172A"/>
+  <circle cx="55.5" cy="41" r="5.5" fill="#0F172A"/>
+  <circle cx="40.5" cy="41" r="2" fill="#7DD3FC"/>
+  <circle cx="55.5" cy="41" r="2" fill="#7DD3FC"/>
+  <rect x="39" y="50" width="18" height="4" rx="2" fill="#60A5FA"/>
+  <rect x="34" y="61" width="28" height="7" rx="3.5" fill="#DCEEFF"/>
+  <rect x="26" y="64" width="10" height="4" rx="2" fill="#A5D8FF"/>
+  <rect x="60" y="64" width="10" height="4" rx="2" fill="#A5D8FF"/>
+  <rect x="33" y="68" width="6" height="9" rx="3" fill="#DCEEFF"/>
+  <rect x="57" y="68" width="6" height="9" rx="3" fill="#DCEEFF"/>
+</svg>

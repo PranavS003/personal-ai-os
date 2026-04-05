@@ -10,6 +10,7 @@ const streakValue = document.getElementById("streakValue");
 const streakText = document.getElementById("streakText");
 const skillSuggestionSlidesContainer = document.getElementById("skillSuggestionSlides");
 const taskProgressMeta = document.getElementById("taskProgressMeta");
+const taskProgressFill = document.getElementById("taskProgressFill");
 const dailyTaskList = document.getElementById("dailyTaskList");
 const dailyTaskMeta = document.getElementById("dailyTaskMeta");
 const longTermTaskList = document.getElementById("longTermTaskList");
@@ -29,12 +30,15 @@ const chatClose = document.getElementById("chatClose");
 const chatMessages = document.getElementById("chatMessages");
 const chatForm = document.getElementById("chatForm");
 const chatInput = document.getElementById("chatInput");
+const quickPrompts = document.getElementById("quickPrompts");
 const chatSendButton = chatForm ? chatForm.querySelector("button") : null;
 const chatSuggestions = Array.from(document.querySelectorAll("[data-chat-question]"));
 const quickTaskForm = document.getElementById("quickTaskForm");
 const quickTaskInput = document.getElementById("quickTaskInput");
 const quickTaskType = document.getElementById("quickTaskType");
 const quickTaskPriority = document.getElementById("quickTaskPriority");
+const quickTaskTypeChips = document.getElementById("quickTaskTypeChips");
+const quickTaskPriorityChips = document.getElementById("quickTaskPriorityChips");
 const healthForm = document.getElementById("healthForm");
 const heightInput = document.getElementById("heightInput");
 const weightInput = document.getElementById("weightInput");
@@ -44,11 +48,12 @@ const insightsBody = document.getElementById("insightsBody");
 const dashboardHeroText = document.getElementById("dashboardHeroText");
 const supportButton = document.getElementById("supportButton");
 const supportPanel = document.getElementById("supportPanel");
+const actionPlanView = document.getElementById("actionPlanView");
 const dashboardPage = document.getElementById("dashboardPage");
 const activityPage = document.getElementById("activityPage");
 const dashboardTab = document.getElementById("dashboardTab");
 const activityTab = document.getElementById("activityTab");
-const aiModal = document.getElementById("aiModal");
+const aiWidget = document.querySelector(".ai-widget.ai-center-btn");
 
 const energyQuestions = [
     "How many hours did you sleep?",
@@ -76,6 +81,8 @@ let skillSuggestions = [];
 let currentSkillSuggestionIndex = 0;
 let skillSuggestionTimer = null;
 let supportHideTimer = null;
+let activeMetricCardKey = null;
+let firstOpen = !Boolean(chatMessages?.querySelector(".chat-message.user"));
 
 const GUIDANCE_ROTATION_MS = 5000;
 const SKILL_ROTATION_MS = 5000;
@@ -85,7 +92,6 @@ const DEFAULT_METRIC_TARGETS = Object.freeze({
     study: 4,
     calories: 400,
 });
-const metricPickerStates = new Map();
 const metricSaveTimers = new Map();
 let metricTargets = loadMetricTargets();
 
@@ -107,16 +113,6 @@ function setDashboardFeedback(message, isError = false) {
     dashboardFeedback.classList.toggle("error", isError);
 }
 
-function setAiModalOpen(isOpen) {
-    if (!aiModal) {
-        return;
-    }
-
-    aiModal.classList.toggle("hidden", !isOpen);
-    aiModal.setAttribute("aria-hidden", isOpen ? "false" : "true");
-    document.body.classList.toggle("ai-modal-open", isOpen);
-}
-
 function setActiveNav(page) {
     dashboardTab?.classList.toggle("active", page === "dashboard");
     activityTab?.classList.toggle("active", page === "activity");
@@ -136,15 +132,49 @@ function showPage(page = "dashboard") {
     }
 
     setActiveNav(isDashboard ? "dashboard" : "activity");
+
+    if (!isDashboard && chatShell?.classList.contains("chat-open")) {
+        setChatOpen(false);
+    }
 }
 
 function openAI() {
-    setAiModalOpen(true);
+    showPage("dashboard");
     setChatOpen(true);
+    showInitialPrompts();
 }
 
 function closeAI() {
     setChatOpen(false);
+}
+
+function goDashboard() {
+    showPage("dashboard");
+}
+
+function goActivity() {
+    showPage("activity");
+}
+
+function showInitialPrompts() {
+    if (!quickPrompts) {
+        return;
+    }
+
+    quickPrompts.style.display = firstOpen ? "flex" : "none";
+}
+
+function hideInitialPrompts() {
+    if (!quickPrompts) {
+        return;
+    }
+
+    quickPrompts.style.display = "none";
+}
+
+function markPromptJourneyStarted() {
+    firstOpen = false;
+    hideInitialPrompts();
 }
 
 function setSupportPanelOpen(isOpen) {
@@ -503,8 +533,8 @@ function getMetricConfig(metricKey, summary = {}) {
             unit: "hrs",
             tone: "sleep",
             targetStep: 1,
-            minTarget: 1,
-            maxTarget: 24,
+            minTarget: 4,
+            maxTarget: 12,
             valueStep: 1,
             rangeMin: 0,
             rangeMax: 24,
@@ -516,8 +546,8 @@ function getMetricConfig(metricKey, summary = {}) {
             unit: "kcal",
             tone: "calories",
             targetStep: 50,
-            minTarget: 50,
-            maxTarget: 2000,
+            minTarget: 100,
+            maxTarget: 1000,
             valueStep: 10,
             rangeMin: 0,
             rangeMax: Math.max(1000, (Number(summary.calories_burned) || 0) + 200, (Number(metricTargets.calories) || 0) + 200),
@@ -530,7 +560,7 @@ function getMetricConfig(metricKey, summary = {}) {
             tone: "study",
             targetStep: 1,
             minTarget: 1,
-            maxTarget: 12,
+            maxTarget: 10,
             valueStep: 1,
             rangeMin: 0,
             rangeMax: 12,
@@ -570,60 +600,71 @@ function getMetricTargetValue(metricKey) {
     return Math.max(config?.minTarget || 1, Math.min(nextTarget, config?.maxTarget || nextTarget));
 }
 
-function buildMetricPickerOptions(metricKey, currentValue, targetValue) {
-    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
-    if (!config) {
-        return [];
+function getMetricControlDefinitions(metricKey, summary = {}) {
+    const currentValue = getMetricCurrentValue(metricKey, summary);
+    const targetValue = getMetricTargetValue(metricKey);
+    const config = getMetricConfig(metricKey, summary);
+
+    if (metricKey === "sleep") {
+        return [
+            { label: "Current", type: "current", value: currentValue, step: config.valueStep, min: 0, max: 24 },
+            { label: "Target", type: "target", value: targetValue, step: config.targetStep, min: 4, max: 12 },
+        ];
+    }
+
+    if (metricKey === "study") {
+        return [
+            { label: "Current", type: "current", value: currentValue, step: config.valueStep, min: 0, max: 12 },
+            { label: "Target", type: "target", value: targetValue, step: config.targetStep, min: 1, max: 10 },
+        ];
     }
 
     if (metricKey === "calories") {
-        return [];
+        return [
+            { label: "Target", type: "target", value: targetValue, step: config.targetStep, min: 100, max: 1000 },
+        ];
     }
 
-    const options = [];
-    for (let value = config.rangeMin; value <= config.rangeMax; value += config.valueStep) {
-        options.push(value);
-    }
-
-    if (!options.includes(currentValue)) {
-        options.push(currentValue);
-    }
-
-    if (!options.includes(targetValue)) {
-        options.push(targetValue);
-    }
-
-    return Array.from(new Set(options))
-        .map((value) => Number(value))
-        .sort((left, right) => left - right);
+    return [];
 }
 
-function createMetricPickerMarkup(metricKey, options, currentValue) {
+function createMetricExpandContent(metricKey, summary = {}) {
+    if (metricKey === "energy") {
+        return `
+            <div class="metric-popup">
+                <div class="metric-popup-body">
+                    <div class="metric-control">
+                        <button type="button" class="metric-action-button" onclick="openEnergyFromCard(event)">Refine Energy</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
     return `
-        <div class="metric-value-picker" data-metric-picker="${metricKey}" tabindex="0" aria-label="${escapeHtml(metricKey)} current value selector">
-            ${options.map((option) => `
-                <button
-                    type="button"
-                    class="metric-picker-item ${Number(option) === Number(currentValue) ? "active" : ""}"
-                    data-picker-value="${escapeHtml(option)}"
-                    aria-selected="${Number(option) === Number(currentValue) ? "true" : "false"}"
-                >
-                    ${escapeHtml(formatMetricValue(metricKey, option))}
-                </button>
-            `).join("")}
-        </div>
-    `;
-}
-
-function getMetricIdPrefix(metricKey) {
-    return metricKey === "calories" ? "calorie" : metricKey;
-}
-
-function createMetricTargetControls(metricKey) {
-    return `
-        <div class="metric-adjust-controls">
-            <button type="button" class="adjust-btn" onclick="updateTarget('${metricKey}', 1)" aria-label="Increase ${escapeHtml(metricKey)} target">+</button>
-            <button type="button" class="adjust-btn" onclick="updateTarget('${metricKey}', -1)" aria-label="Decrease ${escapeHtml(metricKey)} target">-</button>
+        <div class="metric-popup">
+            <div class="metric-popup-body">
+                ${getMetricControlDefinitions(metricKey, summary).map((definition) => `
+                    <div class="metric-row row">
+                        <label>${escapeHtml(definition.label)}</label>
+                        <div class="control metric-inline-control">
+                            <button
+                                type="button"
+                                onclick="${definition.type === "current" ? "decCurrent" : "decTarget"}(event, '${metricKey}')"
+                                aria-label="Decrease ${escapeHtml(metricKey)} ${escapeHtml(definition.label.toLowerCase())}"
+                            >-</button>
+                            <span ${definition.type === "current" ? `data-metric-current="${metricKey}"` : `data-metric-target="${metricKey}"`}>
+                                ${escapeHtml(formatMetricValue(metricKey, definition.value))}
+                            </span>
+                            <button
+                                type="button"
+                                onclick="${definition.type === "current" ? "incCurrent" : "incTarget"}(event, '${metricKey}')"
+                                aria-label="Increase ${escapeHtml(metricKey)} ${escapeHtml(definition.label.toLowerCase())}"
+                            >+</button>
+                        </div>
+                    </div>
+                `).join("")}
+            </div>
         </div>
     `;
 }
@@ -633,44 +674,35 @@ function createInteractiveMetricCard(metricKey, summary = {}, delay = 0) {
     const currentValue = getMetricCurrentValue(metricKey, summary);
     const targetValue = getMetricTargetValue(metricKey);
     const progressPercent = clampPercent((currentValue / targetValue) * 100);
-    const pickerOptions = buildMetricPickerOptions(metricKey, currentValue, targetValue);
-    const idPrefix = getMetricIdPrefix(metricKey);
-    const showPicker = metricKey !== "calories";
+    const isActive = activeMetricCardKey === metricKey;
 
     return `
-        <article class="metric-target-card tone-${config.tone}" data-metric-card="${metricKey}">
-            <div class="metric-card-head">
-                <div>
-                    <span class="metric-card-label">${metricKey === "study" ? `<span id="focusLabel">${escapeHtml(config.label)}</span>` : escapeHtml(config.label)}</span>
-                    <strong class="metric-card-value" data-metric-value="${metricKey}">
-                        <span id="${idPrefix}Current">${escapeHtml(formatMetricValue(metricKey, currentValue))}</span>
-                        /
-                        <span id="${idPrefix}Target">${escapeHtml(formatMetricValue(metricKey, targetValue))}</span>
-                        ${escapeHtml(config.unit)}
-                    </strong>
+        <article
+            class="metric-card tone-${config.tone} ${isActive ? "active" : ""}"
+            data-metric-card="${metricKey}"
+            tabindex="0"
+            aria-expanded="${isActive ? "true" : "false"}"
+            onclick="toggleMetric(this)"
+        >
+            <div class="metric-display">
+                <div class="metric-header">${metricKey === "study" ? `<span id="focusLabel">${escapeHtml(config.label)}</span>` : escapeHtml(config.label)}</div>
+                <div class="metric-ring">
+                        <div class="progress-ring ring-${config.tone}" data-progress="${progressPercent}" data-delay="${delay}">
+                            <div class="progress-ring-core">
+                                <strong data-ring-text="${metricKey}">${escapeHtml(formatMetricValue(metricKey, currentValue))}</strong>
+                                <span>${escapeHtml(config.unit)}</span>
+                            </div>
+                        </div>
+                </div>
+                <div class="metric-value" data-metric-value="${metricKey}">
+                    <span data-metric-current="${metricKey}">${escapeHtml(formatMetricValue(metricKey, currentValue))}</span>
+                    /
+                    <span data-metric-target="${metricKey}">${escapeHtml(formatMetricValue(metricKey, targetValue))}</span>
+                    ${escapeHtml(config.unit)}
                 </div>
             </div>
-            <div class="metric-card-body">
-                <div class="metric-ring-wrap">
-                    <div class="progress-ring ring-${config.tone}" data-progress="${progressPercent}" data-delay="${delay}">
-                        <div class="progress-ring-core">
-                            <strong data-ring-text="${metricKey}">${escapeHtml(formatMetricValue(metricKey, currentValue))} / ${escapeHtml(formatMetricValue(metricKey, targetValue))}</strong>
-                            <span>${escapeHtml(config.unit)}</span>
-                        </div>
-                    </div>
-                    ${createMetricTargetControls(metricKey)}
-                </div>
-                ${showPicker ? `
-                    <div class="metric-picker-panel">
-                        <span class="metric-picker-label">Current</span>
-                        ${createMetricPickerMarkup(metricKey, pickerOptions, currentValue)}
-                    </div>
-                ` : `
-                    <div class="metric-picker-panel metric-picker-panel-static">
-                        <span class="metric-picker-label">Current</span>
-                        <p class="metric-static-note">Auto from workout log</p>
-                    </div>
-                `}
+            <div class="metric-expand ${isActive ? "" : "hidden"}" aria-hidden="${isActive ? "false" : "true"}" onclick="event.stopPropagation()">
+                ${createMetricExpandContent(metricKey, summary)}
             </div>
         </article>
     `;
@@ -678,25 +710,32 @@ function createInteractiveMetricCard(metricKey, summary = {}, delay = 0) {
 
 function createEnergyMetricCard(summary = {}, bars = {}) {
     const energyPercent = bars.energy?.percent ?? summary.energy_percent ?? 0;
+    const isActive = activeMetricCardKey === "energy";
 
     return `
-        <button type="button" class="metric-target-card energy-metric-card" data-open-energy-modal="true" aria-label="Open energy check">
-            <div class="metric-card-head">
-                <div>
-                    <span class="metric-card-label">Energy</span>
-                    <strong class="metric-card-value">${escapeHtml(energyPercent)}%</strong>
+        <article
+            class="metric-card tone-energy energy-metric-card ${isActive ? "active" : ""}"
+            data-metric-card="energy"
+            tabindex="0"
+            aria-expanded="${isActive ? "true" : "false"}"
+            onclick="toggleMetric(this)"
+        >
+            <div class="metric-display">
+                <div class="metric-header">Energy</div>
+                <div class="metric-ring">
+                        <div class="progress-ring ring-energy" data-progress="${clampPercent(energyPercent)}" data-delay="360">
+                            <div class="progress-ring-core">
+                                <strong data-ring-text="energy">${escapeHtml(energyPercent)}%</strong>
+                                <span>live</span>
+                            </div>
+                        </div>
                 </div>
+                <div class="metric-value">${escapeHtml(energyPercent)}%</div>
             </div>
-            <div class="metric-card-body metric-card-body-compact">
-                <div class="progress-ring ring-energy" data-progress="${clampPercent(energyPercent)}" data-delay="360">
-                    <div class="progress-ring-core">
-                        <strong>${escapeHtml(energyPercent)}%</strong>
-                        <span>live</span>
-                    </div>
-                </div>
-                <p class="metric-energy-note">Open the energy check to refresh your score.</p>
+            <div class="metric-expand ${isActive ? "" : "hidden"}" aria-hidden="${isActive ? "false" : "true"}" onclick="event.stopPropagation()">
+                ${createMetricExpandContent("energy", summary)}
             </div>
-        </button>
+        </article>
     `;
 }
 
@@ -757,7 +796,6 @@ function updateMetricCardDisplay(metricKey) {
     const targetValue = getMetricTargetValue(metricKey);
     const progressPercent = clampPercent((currentValue / targetValue) * 100);
     const metricCard = progressGrid.querySelector(`[data-metric-card="${metricKey}"]`);
-    const idPrefix = getMetricIdPrefix(metricKey);
 
     if (!metricCard) {
         return;
@@ -766,28 +804,28 @@ function updateMetricCardDisplay(metricKey) {
     const valueLabel = metricCard.querySelector(`[data-metric-value="${metricKey}"]`);
     const ringText = metricCard.querySelector(`[data-ring-text="${metricKey}"]`);
     const ring = metricCard.querySelector(".progress-ring");
-    const currentText = document.getElementById(`${idPrefix}Current`);
-    const targetText = document.getElementById(`${idPrefix}Target`);
+    const currentNodes = metricCard.querySelectorAll(`[data-metric-current="${metricKey}"]`);
+    const targetNodes = metricCard.querySelectorAll(`[data-metric-target="${metricKey}"]`);
 
-    if (currentText) {
-        currentText.textContent = formatMetricValue(metricKey, currentValue);
-    }
+    currentNodes.forEach((node) => {
+        node.textContent = formatMetricValue(metricKey, currentValue);
+    });
 
-    if (targetText) {
-        targetText.textContent = formatMetricValue(metricKey, targetValue);
-    }
+    targetNodes.forEach((node) => {
+        node.textContent = formatMetricValue(metricKey, targetValue);
+    });
 
     if (valueLabel) {
         valueLabel.innerHTML = `
-            <span id="${idPrefix}Current">${escapeHtml(formatMetricValue(metricKey, currentValue))}</span>
+            <span data-metric-current="${metricKey}">${escapeHtml(formatMetricValue(metricKey, currentValue))}</span>
             /
-            <span id="${idPrefix}Target">${escapeHtml(formatMetricValue(metricKey, targetValue))}</span>
+            <span data-metric-target="${metricKey}">${escapeHtml(formatMetricValue(metricKey, targetValue))}</span>
             ${escapeHtml(config.unit)}
         `;
     }
 
     if (ringText) {
-        ringText.textContent = `${formatMetricValue(metricKey, currentValue)} / ${formatMetricValue(metricKey, targetValue)}`;
+        ringText.textContent = formatMetricValue(metricKey, currentValue);
     }
 
     if (ring) {
@@ -796,76 +834,70 @@ function updateMetricCardDisplay(metricKey) {
     }
 }
 
-function applyMetricPickerItemState(item, offset) {
-    const distance = Math.abs(offset);
-    const isActive = offset === 0;
-    const isVisible = distance <= 2;
-    const translateY = offset * 34;
-    const scale = isActive ? 1.08 : distance === 1 ? 0.95 : 0.88;
-    const opacity = isActive ? 1 : distance === 1 ? 0.54 : distance === 2 ? 0.2 : 0;
-
-    item.classList.toggle("active", isActive);
-    item.classList.toggle("is-visible", isVisible);
-    item.setAttribute("aria-selected", isActive ? "true" : "false");
-    item.tabIndex = isActive ? 0 : -1;
-    item.style.transform = `translateY(${translateY}px) scale(${scale})`;
-    item.style.opacity = String(opacity);
-    item.style.pointerEvents = isVisible ? "auto" : "none";
-}
-
-function getPickerWrappedOffset(index, activeIndex, totalItems) {
-    let offset = index - activeIndex;
-    const half = Math.floor(totalItems / 2);
-
-    if (offset > half) {
-        offset -= totalItems;
-    } else if (offset < -half) {
-        offset += totalItems;
-    }
-
-    return offset;
-}
-
-function updateMetricPicker(metricKey, nextIndex, { persist = true, focusActive = false, syncSummary = true } = {}) {
-    const pickerState = metricPickerStates.get(metricKey);
-    if (!pickerState || !pickerState.items.length) {
+function setMetricTargetValue(metricKey, nextValue, { persist = true } = {}) {
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    if (!config) {
         return;
     }
 
-    pickerState.index = (nextIndex + pickerState.items.length) % pickerState.items.length;
-    const nextValue = Number(pickerState.items[pickerState.index].dataset.pickerValue);
-
-    pickerState.items.forEach((item, index) => {
-        const offset = getPickerWrappedOffset(index, pickerState.index, pickerState.items.length);
-        applyMetricPickerItemState(item, offset);
-    });
-
-    if (focusActive) {
-        pickerState.items[pickerState.index].focus({ preventScroll: true });
-    }
-
-    if (syncSummary) {
-        setMetricSummaryValue(metricKey, nextValue);
-        updateMetricCardDisplay(metricKey);
-    }
+    const clampedValue = Math.max(config.minTarget, Math.min(Number(nextValue), config.maxTarget));
+    metricTargets = {
+        ...metricTargets,
+        [metricKey]: clampedValue,
+    };
 
     if (persist) {
-        queueMetricSave(metricKey, nextValue);
+        saveMetricTargets();
     }
+
+    updateMetricCardDisplay(metricKey);
 }
 
-function hydrateMetricPickers(summary = {}) {
-    metricPickerStates.clear();
+function updateMetricCurrentValue(metricKey, delta) {
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    if (!config || metricKey === "calories") {
+        return;
+    }
 
-    progressGrid?.querySelectorAll("[data-metric-picker]").forEach((picker) => {
-        const metricKey = picker.dataset.metricPicker;
-        const items = Array.from(picker.querySelectorAll(".metric-picker-item"));
-        const currentValue = getMetricCurrentValue(metricKey, summary);
-        const activeIndex = Math.max(items.findIndex((item) => Number(item.dataset.pickerValue) === Number(currentValue)), 0);
+    const currentValue = getMetricCurrentValue(metricKey, dashboardState?.summary || {});
+    const nextValue = Math.max(config.rangeMin, Math.min(currentValue + delta, config.rangeMax));
+    setMetricSummaryValue(metricKey, nextValue);
+    updateMetricCardDisplay(metricKey);
+    queueMetricSave(metricKey, nextValue);
+}
 
-        metricPickerStates.set(metricKey, { picker, items, index: activeIndex });
-        updateMetricPicker(metricKey, activeIndex, { persist: false, focusActive: false, syncSummary: false });
-    });
+function updateMetricTargetByDelta(metricKey, delta) {
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    if (!config) {
+        return;
+    }
+
+    const nextValue = getMetricTargetValue(metricKey) + delta;
+    setMetricTargetValue(metricKey, nextValue, { persist: true });
+}
+
+function incCurrent(event, metricKey) {
+    event?.stopPropagation();
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    updateMetricCurrentValue(metricKey, config?.valueStep || 1);
+}
+
+function decCurrent(event, metricKey) {
+    event?.stopPropagation();
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    updateMetricCurrentValue(metricKey, -(config?.valueStep || 1));
+}
+
+function incTarget(event, metricKey) {
+    event?.stopPropagation();
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    updateMetricTargetByDelta(metricKey, config?.targetStep || 1);
+}
+
+function decTarget(event, metricKey) {
+    event?.stopPropagation();
+    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
+    updateMetricTargetByDelta(metricKey, -(config?.targetStep || 1));
 }
 
 function queueMetricSave(metricKey, value) {
@@ -912,49 +944,29 @@ function queueMetricSave(metricKey, value) {
     metricSaveTimers.set(metricKey, timeoutId);
 }
 
-function updateTarget(metricKey, change) {
-    const config = getMetricConfig(metricKey, dashboardState?.summary || {});
-    let nextTarget = getMetricTargetValue(metricKey);
-
-    if (metricKey === "sleep") {
-        nextTarget += change;
-        if (nextTarget < 1) {
-            nextTarget = 1;
-        }
-    } else if (metricKey === "study") {
-        nextTarget += change;
-        if (nextTarget < 1) {
-            nextTarget = 1;
-        }
-    } else if (metricKey === "calories") {
-        nextTarget += change * 50;
-        if (nextTarget < 100) {
-            nextTarget = 100;
-        }
-    } else {
-        return;
-    }
-
-    nextTarget = Math.min(nextTarget, config.maxTarget);
-
-    metricTargets = {
-        ...metricTargets,
-        [metricKey]: Number(nextTarget),
-    };
-    saveMetricTargets();
-    updateMetricCardDisplay(metricKey);
+function openEnergyFromCard(event) {
+    event?.stopPropagation();
+    openEnergyModal();
 }
 
-window.updateTarget = updateTarget;
+window.openEnergyFromCard = openEnergyFromCard;
+window.incCurrent = incCurrent;
+window.decCurrent = decCurrent;
+window.incTarget = incTarget;
+window.decTarget = decTarget;
 
 function renderProgressGrid(metrics, summary = {}, bars = {}) {
     if (!progressGrid) {
         return;
     }
 
+    if (activeMetricCardKey && !["sleep", "calories", "study", "energy"].includes(activeMetricCardKey)) {
+        activeMetricCardKey = null;
+    }
+
     progressGrid.innerHTML = `
         <article class="metrics-compact-card metrics-interactive-card">
-            <div class="metrics-ring-grid metrics-interactive-grid">
+            <div class="metrics-grid metrics-interactive-grid">
                 ${createInteractiveMetricCard("sleep", summary, 0)}
                 ${createInteractiveMetricCard("calories", summary, 120)}
                 ${createInteractiveMetricCard("study", summary, 240)}
@@ -963,27 +975,94 @@ function renderProgressGrid(metrics, summary = {}, bars = {}) {
         </article>
     `;
 
-    hydrateMetricPickers(summary);
     syncFocusLabel(focusLabel);
 }
 
+function syncMetricCardState(card, isActive) {
+    if (!card) {
+        return;
+    }
+
+    card.classList.toggle("active", isActive);
+    card.setAttribute("aria-expanded", isActive ? "true" : "false");
+    const expand = card.querySelector(".metric-expand");
+    if (expand) {
+        expand.classList.toggle("hidden", !isActive);
+        expand.setAttribute("aria-hidden", isActive ? "false" : "true");
+    }
+}
+
+function toggleMetric(card) {
+    const resolvedCard = card?.closest ? card.closest(".metric-card") : card;
+    if (!resolvedCard) {
+        return;
+    }
+
+    progressGrid?.querySelectorAll(".metric-card").forEach((metricCard) => {
+        if (metricCard !== resolvedCard) {
+            syncMetricCardState(metricCard, false);
+        }
+    });
+
+    const nextIsActive = !resolvedCard.classList.contains("active");
+    activeMetricCardKey = nextIsActive ? (resolvedCard.dataset.metricCard || null) : null;
+    syncMetricCardState(resolvedCard, nextIsActive);
+}
+
+window.toggleMetric = toggleMetric;
+
+function closeMetricPopups() {
+    activeMetricCardKey = null;
+    progressGrid?.querySelectorAll(".metric-card").forEach((metricCard) => {
+        syncMetricCardState(metricCard, false);
+    });
+}
+
 function createDailyTaskCard(task) {
+    const priority = String(task.priority || "Medium");
+    const priorityClass = `priority-${priority.toLowerCase()}`;
+
     return `
-        <label class="task-tile task-compact-item ${task.completed ? "done" : ""}">
+        <label class="task-tile task-compact-item task-premium-card ${task.completed ? "done" : ""}">
             <input class="task-tile-toggle compact-task-toggle" type="checkbox" data-task-type="daily" data-task-name="${escapeHtml(task.name)}" ${task.completed ? "checked" : ""}>
-            <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
+            <span class="task-status-dot" aria-hidden="true"></span>
+            <span class="task-card-main">
+                <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
+            </span>
+            <span class="task-card-meta">
+                <span class="task-priority-badge ${priorityClass}">${escapeHtml(priority)}</span>
+            </span>
         </label>
     `;
 }
 
 function createLongTermTaskCard(task) {
+    const priority = String(task.priority || "Medium");
+    const priorityClass = `priority-${priority.toLowerCase()}`;
+
     return `
-        <label class="task-tile task-compact-item long-term-tile ${task.completed ? "done" : ""}">
+        <label class="task-tile task-compact-item long-term-tile task-premium-card ${task.completed ? "done" : ""}">
             <input class="task-tile-toggle compact-task-toggle" type="checkbox" data-task-type="long_term" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" ${task.completed ? "checked" : ""}>
-            <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
-            <span class="task-streak-inline">&#128293; ${task.streak_count || 0} day${task.streak_count === 1 ? "" : "s"}</span>
+            <span class="task-status-dot" aria-hidden="true"></span>
+            <span class="task-card-main">
+                <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
+            </span>
+            <span class="task-card-meta task-goal-meta">
+                <span class="task-priority-badge ${priorityClass}">${escapeHtml(priority)}</span>
+                <span class="task-streak-inline">&#128293; ${task.streak_count || 0} day${task.streak_count === 1 ? "" : "s"}</span>
+            </span>
         </label>
     `;
+}
+
+function syncTaskComposerState() {
+    quickTaskTypeChips?.querySelectorAll("[data-task-type-value]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.taskTypeValue === (quickTaskType?.value || "daily"));
+    });
+
+    quickTaskPriorityChips?.querySelectorAll("[data-priority-value]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.priorityValue === (quickTaskPriority?.value || "Medium"));
+    });
 }
 
 function renderTaskLists(dailyTasks = [], longTermTasks = []) {
@@ -992,11 +1071,16 @@ function renderTaskLists(dailyTasks = [], longTermTasks = []) {
     }
 
     const completedTasks = dailyTasks.filter((task) => task.completed).length;
+    const progressPercent = dailyTasks.length ? Math.round((completedTasks / dailyTasks.length) * 100) : 0;
 
     if (taskProgressMeta) {
         taskProgressMeta.textContent = dailyTasks.length
             ? `${completedTasks}/${dailyTasks.length} done`
-            : "";
+            : "No tasks yet";
+    }
+
+    if (taskProgressFill) {
+        taskProgressFill.style.width = `${progressPercent}%`;
     }
 
     if (dailyTaskMeta) {
@@ -1225,6 +1309,7 @@ async function handleQuickTaskSubmit(event) {
         if (quickTaskType) {
             quickTaskType.value = "daily";
         }
+        syncTaskComposerState();
 
         renderDashboard(data.dashboard_state);
         setDashboardFeedback(type === "long_term" ? "Long-term goal added." : "Task added to today.");
@@ -1379,12 +1464,13 @@ function appendChatMessage(role, text, extraClass = "") {
     }
 
     const message = document.createElement("div");
-    message.className = `chat-message ${role} ${extraClass}`.trim();
+    message.className = `chat-message ${role === "user" ? "chat-user user" : "chat-ai bot"} ${extraClass}`.trim();
 
     if (role === "bot") {
-        const avatar = document.createElement("span");
+        const avatar = document.createElement("div");
         avatar.className = "chat-avatar chat-avatar-inline";
         avatar.setAttribute("aria-hidden", "true");
+        avatar.innerHTML = '<img src="/static/images/ai-avatar.svg" alt="">';
         message.appendChild(avatar);
     }
 
@@ -1409,10 +1495,16 @@ function setChatOpen(isOpen) {
         return;
     }
 
-    chatWidget.classList.toggle("hidden", !isOpen);
     chatShell?.classList.toggle("chat-open", isOpen);
-    chatToggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
-    setAiModalOpen(isOpen);
+    chatShell?.setAttribute("aria-hidden", isOpen ? "false" : "true");
+    chatWidget.setAttribute("aria-hidden", isOpen ? "false" : "true");
+    actionPlanView?.classList.toggle("plan-hidden", isOpen);
+    actionPlanView?.setAttribute("aria-hidden", isOpen ? "true" : "false");
+    aiWidget?.classList.toggle("ai-widget-hidden", isOpen);
+    dashboardPage?.classList.toggle("ai-panel-open", isOpen);
+    if (isOpen) {
+        showInitialPrompts();
+    }
 
     if (isOpen && chatInput) {
         window.setTimeout(() => {
@@ -1438,6 +1530,7 @@ async function submitChatMessage(message) {
     }
 
     setChatOpen(true);
+    markPromptJourneyStarted();
     appendChatMessage("user", message);
 
     const typingMessage = appendChatMessage("bot", "", "typing");
@@ -1480,6 +1573,7 @@ async function triggerAiAction(message, buttonLabel = "") {
     }
 
     setChatOpen(true);
+    markPromptJourneyStarted();
 
     if (buttonLabel) {
         appendChatMessage("user", buttonLabel);
@@ -1522,17 +1616,24 @@ async function triggerAiAction(message, buttonLabel = "") {
 async function sendChatMessage(event) {
     event.preventDefault();
 
-    if (!chatInput) {
+    await sendMessage();
+}
+
+async function sendMessage(message = "") {
+    const nextMessage = String(message || chatInput?.value || "").trim();
+    if (!nextMessage) {
         return;
     }
 
-    const message = chatInput.value.trim();
-    if (!message) {
-        return;
+    if (!message && chatInput) {
+        chatInput.value = "";
     }
 
-    chatInput.value = "";
-    await submitChatMessage(message);
+    await submitChatMessage(nextMessage);
+}
+
+async function quickAsk(message) {
+    await sendMessage(message);
 }
 
 window.personalAiDashboard = {
@@ -1550,80 +1651,39 @@ window.personalAiDashboard = {
     showPage,
     openAI,
     closeAI,
+    goDashboard,
+    goActivity,
 };
 
 window.showPage = showPage;
 window.openAI = openAI;
 window.closeAI = closeAI;
+window.goDashboard = goDashboard;
+window.goActivity = goActivity;
+window.sendMessage = sendMessage;
+window.quickAsk = quickAsk;
 
 if (progressGrid) {
-    progressGrid.addEventListener("click", (event) => {
-        const pickerItem = event.target.closest(".metric-picker-item");
-        if (pickerItem) {
-            const picker = pickerItem.closest("[data-metric-picker]");
-            if (!picker) {
-                return;
-            }
-
-            const metricKey = picker.dataset.metricPicker;
-            const pickerState = metricPickerStates.get(metricKey);
-            if (!pickerState) {
-                return;
-            }
-
-            const nextIndex = pickerState.items.findIndex((item) => item === pickerItem);
-            if (nextIndex >= 0) {
-                updateMetricPicker(metricKey, nextIndex, { focusActive: true });
-            }
-            return;
-        }
-
-        const energyTrigger = event.target.closest("[data-open-energy-modal]");
-        if (energyTrigger) {
-            openEnergyModal();
-        }
-    });
-
-    progressGrid.addEventListener("wheel", (event) => {
-        const picker = event.target.closest("[data-metric-picker]");
-        if (!picker) {
-            return;
-        }
-
-        event.preventDefault();
-        const metricKey = picker.dataset.metricPicker;
-        const pickerState = metricPickerStates.get(metricKey);
-        if (!pickerState) {
-            return;
-        }
-
-        updateMetricPicker(metricKey, pickerState.index + (event.deltaY > 0 ? 1 : -1));
-    }, { passive: false });
-
     progressGrid.addEventListener("keydown", (event) => {
-        const picker = event.target.closest("[data-metric-picker]");
-        if (!picker) {
-            return;
-        }
-
-        const metricKey = picker.dataset.metricPicker;
-        const pickerState = metricPickerStates.get(metricKey);
-        if (!pickerState) {
-            return;
-        }
-
-        if (event.key === "ArrowDown") {
+        const metricCard = event.target.closest(".metric-card");
+        if (metricCard && (event.key === "Enter" || event.key === " ")) {
             event.preventDefault();
-            updateMetricPicker(metricKey, pickerState.index + 1, { focusActive: true });
-            return;
-        }
-
-        if (event.key === "ArrowUp") {
-            event.preventDefault();
-            updateMetricPicker(metricKey, pickerState.index - 1, { focusActive: true });
+            toggleMetric(metricCard);
         }
     });
 }
+
+document.addEventListener("click", (event) => {
+    if (!activeMetricCardKey) {
+        return;
+    }
+
+    if (event.target.closest(".metric-card")) {
+        return;
+    }
+
+    closeMetricPopups();
+});
 
 if (dailyTaskList) {
     dailyTaskList.addEventListener("change", handleTaskToggle);
@@ -1710,9 +1770,35 @@ if (chatForm) {
     chatForm.addEventListener("submit", sendChatMessage);
 }
 
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && chatShell?.classList.contains("chat-open")) {
+        closeAI();
+    }
+});
+
 if (quickTaskForm) {
     quickTaskForm.addEventListener("submit", handleQuickTaskSubmit);
 }
+
+quickTaskTypeChips?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-task-type-value]");
+    if (!button || !quickTaskType) {
+        return;
+    }
+
+    quickTaskType.value = button.dataset.taskTypeValue || "daily";
+    syncTaskComposerState();
+});
+
+quickTaskPriorityChips?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-priority-value]");
+    if (!button || !quickTaskPriority) {
+        return;
+    }
+
+    quickTaskPriority.value = button.dataset.priorityValue || "Medium";
+    syncTaskComposerState();
+});
 
 if (healthForm) {
     healthForm.addEventListener("submit", handleHealthSubmit);
@@ -1762,22 +1848,12 @@ document.querySelectorAll(".bottom-nav .nav-item").forEach((item) => {
     });
 });
 
-chatSuggestions.forEach((button) => {
-    button.addEventListener("click", async () => {
-        const quickMessage = button.dataset.chatQuestion || button.textContent.trim();
-        if (button.dataset.aiAction) {
-            await triggerAiAction(quickMessage, button.textContent.trim());
-            return;
-        }
-
-        await submitChatMessage(button.dataset.chatQuestion || "");
-    });
-});
-
 showPage("dashboard");
 
 if (dashboardState) {
     renderDashboard(dashboardState);
 }
 
+syncTaskComposerState();
+showInitialPrompts();
 scrollChatToBottom();

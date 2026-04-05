@@ -17,133 +17,206 @@
 
         <main class="app mobile-app-shell">
             <section class="mobile-app-frame">
-                <div id="dashboardPage" class="mobile-page active-page" data-page="dashboard">
-                    <header class="panel workspace-topbar dashboard-hero-panel mobile-hero-panel">
-                        <div class="workspace-copy dashboard-hero-copy">
-                            <p class="panel-kicker">Personal AI OS</p>
-                            <h1>Welcome back, {{ current_user_display }}</h1>
-                            <p id="dashboardHeroText" class="hero-text">Your day at a glance.</p>
-                        </div>
-                        <div class="workspace-actions mobile-workspace-actions">
-                            <button id="refreshDashboard" type="button" class="ghost-button">Refresh Dashboard</button>
-                            <button id="resetDay" type="button" class="ghost-button danger-button">Reset Day</button>
-                            <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
-                        </div>
-                    </header>
-
-                    <section class="panel ai-plan-panel mobile-card-section">
-                        <div class="panel-heading highlight-heading">
-                            <div>
-                                <p class="panel-kicker">Today's AI Plan</p>
-                                <h2>Actionable plan for today</h2>
+                <div id="dashboardPage" class="mobile-page active-page dashboard-container" data-page="dashboard">
+                    <div class="welcome-section">
+                        <header class="panel workspace-topbar dashboard-hero-panel mobile-hero-panel">
+                            <div class="workspace-copy dashboard-hero-copy">
+                                <p class="panel-kicker">Personal AI OS</p>
+                                <h1>Welcome back, {{ current_user_display }}</h1>
+                                <p id="dashboardHeroText" class="hero-text">Your day at a glance.</p>
                             </div>
-                            <span class="panel-pill highlight-pill">AI Generated Plan &bull; Live</span>
-                        </div>
-                        <div id="aiSuggestionsList" class="guidance-layout">
-                            <section class="guidance-slider-card" aria-label="Daily guidance">
-                                <div class="guidance-slider-head">
-                                    <button id="guidancePrev" type="button" class="guidance-nav-button" aria-label="Previous guidance">&#8249;</button>
-                                    <div class="guidance-slider-copy">
-                                        <span id="guidanceStep" class="guidance-step">Tip 1</span>
-                                        <div id="guidanceSlides" class="plan-slides guidance-slides" aria-live="polite">
-                                            <article class="plan-slide guidance-slide active" aria-hidden="false">
-                                                <span class="plan-slide-icon guidance-icon" aria-hidden="true">&#128218;</span>
-                                                <p class="plan-slide-text guidance-text">Guidance will appear here.</p>
-                                            </article>
+                            <div class="workspace-actions mobile-workspace-actions">
+                                <button id="refreshDashboard" type="button" class="ghost-button">Refresh Dashboard</button>
+                                <button id="resetDay" type="button" class="ghost-button danger-button">Reset Day</button>
+                                <a href="{{ url_for('logout') }}" class="logout-link">Logout</a>
+                            </div>
+                        </header>
+                    </div>
+
+                    <div class="dashboard-main">
+                        <div class="action-plan">
+                            <section class="panel ai-plan-panel mobile-card-section">
+                                <div class="ai-plan-stage">
+                                    <div id="actionPlanView" class="action-plan-view">
+                                        <div class="panel-heading highlight-heading">
+                                            <div>
+                                                <p class="panel-kicker">Today's AI Plan</p>
+                                                <h2>Actionable plan for today</h2>
+                                            </div>
+                                            <span class="panel-pill highlight-pill">AI Generated Plan &bull; Live</span>
+                                        </div>
+                                        <div id="aiSuggestionsList" class="guidance-layout">
+                                            <section class="guidance-slider-card" aria-label="Daily guidance">
+                                                <div class="guidance-slider-head">
+                                                    <button id="guidancePrev" type="button" class="guidance-nav-button" aria-label="Previous guidance">&#8249;</button>
+                                                    <div class="guidance-slider-copy">
+                                                        <span id="guidanceStep" class="guidance-step">Tip 1</span>
+                                                        <div id="guidanceSlides" class="plan-slides guidance-slides" aria-live="polite">
+                                                            <article class="plan-slide guidance-slide active" aria-hidden="false">
+                                                                <span class="plan-slide-icon guidance-icon" aria-hidden="true">&#128218;</span>
+                                                                <p class="plan-slide-text guidance-text">Guidance will appear here.</p>
+                                                            </article>
+                                                        </div>
+                                                    </div>
+                                                    <button id="guidanceNext" type="button" class="guidance-nav-button" aria-label="Next guidance">&#8250;</button>
+                                                </div>
+                                                <div id="guidanceDots" class="guidance-dots" aria-label="Guidance progress"></div>
+                                            </section>
+                                            <aside class="guidance-sidecards">
+                                                <article class="guidance-sidecard streak-card" aria-label="Streak card">
+                                                    <span id="streakValue" class="streak-value">&#128293; 0 Day Streak</span>
+                                                    <p id="streakText" class="streak-text">Consistency builds momentum</p>
+                                                </article>
+                                                <article class="guidance-sidecard skill-card" aria-label="Skill suggestion">
+                                                    <span class="skill-card-label">Skill Suggestion</span>
+                                                    <div id="skillSuggestionSlides" class="plan-slides skill-slides" aria-live="polite">
+                                                        <article class="plan-slide skill-slide active" aria-hidden="false">
+                                                            <span class="plan-slide-icon skill-suggestion-icon" aria-hidden="true">&#128218;</span>
+                                                            <p class="plan-slide-text skill-suggestion-text">Read 10 pages</p>
+                                                        </article>
+                                                    </div>
+                                                </article>
+                                            </aside>
                                         </div>
                                     </div>
-                                    <button id="guidanceNext" type="button" class="guidance-nav-button" aria-label="Next guidance">&#8250;</button>
+
+                                    <section id="chatShell" class="embedded-ai-shell" aria-hidden="true">
+                                        <section id="chatWidget" class="embedded-ai-panel ai-container ai-modal-chat-widget" aria-label="AI chatbot" aria-hidden="true">
+                                            <header class="ai-header embedded-ai-header">
+                                                <div class="ai-header-brand">
+                                                    <div class="ai-avatar ai-header-avatar" aria-hidden="true">
+                                                        <img src="/static/images/ai-avatar.svg" alt="">
+                                                    </div>
+                                                    <div>
+                                                        <h2 id="aiAssistantTitle">Personal AI Assistant</h2>
+                                                        <p class="ai-header-subtitle">Your daily intelligent guide</p>
+                                                    </div>
+                                                </div>
+                                                <button id="chatClose" type="button" class="ai-close-button embedded-ai-back-button">Dashboard</button>
+                                            </header>
+
+                                            <div id="quickPrompts" class="prompt-container" aria-label="Suggested questions">
+                                                <button type="button" data-chat-question="What should I focus on today?" onclick="quickAsk('What should I focus on today?')">
+                                                    What should I focus on today?
+                                                </button>
+                                                <button type="button" data-chat-question="Build my study plan" onclick="quickAsk('Build my study plan')">
+                                                    Build my study plan
+                                                </button>
+                                                <button type="button" data-chat-question="Raise my energy" onclick="quickAsk('Raise my energy')">
+                                                    Raise my energy
+                                                </button>
+                                                <button type="button" data-chat-question="Plan my evening" onclick="quickAsk('Plan my evening')">
+                                                    Plan my evening
+                                                </button>
+                                            </div>
+
+                                            <div id="chatMessages" class="ai-chat-area ai-chat">
+                                                {% if chat_history %}
+                                                    {% for message in chat_history %}
+                                                        <div class="chat-message {{ 'chat-user user' if message.role == 'user' else 'chat-ai bot' }}">
+                                                            {% if message.role != 'user' %}
+                                                                <div class="chat-avatar chat-avatar-inline" aria-hidden="true">
+                                                                    <img src="/static/images/ai-avatar.svg" alt="">
+                                                                </div>
+                                                            {% endif %}
+                                                            <div class="chat-bubble">{{ message.content }}</div>
+                                                        </div>
+                                                    {% endfor %}
+                                                {% else %}
+                                                    <div class="chat-message chat-ai bot">
+                                                        <div class="chat-avatar chat-avatar-inline" aria-hidden="true">
+                                                            <img src="/static/images/ai-avatar.svg" alt="">
+                                                        </div>
+                                                        <div class="chat-bubble">Hi, I’m your personal assistant. I help you plan your day, improve focus, and stay consistent.</div>
+                                                    </div>
+                                                {% endif %}
+                                            </div>
+
+                                            <form id="chatForm" class="ai-input">
+                                                <input type="text" id="chatInput" placeholder="Ask anything..." autocomplete="off">
+                                                <button type="submit">Send</button>
+                                            </form>
+                                        </section>
+                                    </section>
                                 </div>
-                                <div id="guidanceDots" class="guidance-dots" aria-label="Guidance progress"></div>
                             </section>
-                            <aside class="guidance-sidecards">
-                                <article class="guidance-sidecard streak-card" aria-label="Streak card">
-                                    <span id="streakValue" class="streak-value">&#128293; 0 Day Streak</span>
-                                    <p id="streakText" class="streak-text">Consistency builds momentum</p>
-                                </article>
-                                <article class="guidance-sidecard skill-card" aria-label="Skill suggestion">
-                                    <span class="skill-card-label">Skill Suggestion</span>
-                                    <div id="skillSuggestionSlides" class="plan-slides skill-slides" aria-live="polite">
-                                        <article class="plan-slide skill-slide active" aria-hidden="false">
-                                            <span class="plan-slide-icon skill-suggestion-icon" aria-hidden="true">&#128218;</span>
-                                            <p class="plan-slide-text skill-suggestion-text">Read 10 pages</p>
-                                        </article>
+
+                            <p id="dashboardFeedback" class="dashboard-feedback dashboard-feedback-inline" aria-live="polite"></p>
+                        </div>
+
+                        <div class="metrics metrics-section">
+                            <section class="panel dashboard-panel mobile-card-section">
+                                <div class="right-panel-header">
+                                    <div>
+                                        <p class="panel-kicker">Dashboard</p>
+                                        <h2>Metrics</h2>
                                     </div>
-                                </article>
-                            </aside>
+                                    <span class="panel-pill subtle-pill">Sleep, Calories, Study, Energy</span>
+                                </div>
+                                <div id="progressGrid" class="metrics-compact-shell" aria-label="Daily metrics"></div>
+                            </section>
                         </div>
-                    </section>
-
-                    <section class="panel dashboard-panel mobile-card-section">
-                        <div class="right-panel-header">
-                            <div>
-                                <p class="panel-kicker">Dashboard</p>
-                                <h2>Metrics</h2>
-                            </div>
-                            <span class="panel-pill subtle-pill">Sleep, Calories, Study, Energy</span>
-                        </div>
-                        <div id="progressGrid" class="metrics-compact-shell" aria-label="Daily metrics"></div>
-                    </section>
-
-                    <section class="panel motivation-panel mobile-card-section">
-                        <div class="panel-heading">
-                            <div>
-                                <p class="panel-kicker">Daily Motivation</p>
-                                <h2>Stay steady</h2>
-                            </div>
-                        </div>
-                        <div id="motivationPanel" class="motivation-slot"></div>
-                    </section>
-
-                    <p id="dashboardFeedback" class="dashboard-feedback dashboard-feedback-inline" aria-live="polite"></p>
+                    </div>
                 </div>
 
-                <div id="activityPage" class="mobile-page" data-page="activity" style="display: none;">
-                    <section class="panel task-panel-left mobile-card-section mobile-full-width-card">
-                        <div class="panel-heading">
-                            <div>
-                                <p class="panel-kicker">Task System</p>
-                                <h2>Tasks</h2>
-                            </div>
-                            <span id="taskProgressMeta" class="task-progress-meta"></span>
+                <div id="activityPage" class="mobile-page activity-page" data-page="activity" style="display: none;">
+                    <div class="activity-container main-layout">
+                        <div class="tasks-section tasks-panel">
+                            <section class="panel task-panel-left mobile-card-section mobile-full-width-card">
+                                <div class="panel-heading">
+                                    <div>
+                                        <p class="panel-kicker">Task System</p>
+                                        <h2>Tasks</h2>
+                                    </div>
+                                    <span id="taskProgressMeta" class="task-progress-meta"></span>
+                                </div>
+                                <div class="task-progress-shell" aria-hidden="true">
+                                    <div class="task-progress-bar">
+                                        <div id="taskProgressFill" class="task-progress-fill"></div>
+                                    </div>
+                                </div>
+                                <form id="quickTaskForm" class="task-add-form compact-task-form">
+                                    <div class="task-composer-shell">
+                                        <span class="task-composer-icon" aria-hidden="true">&#10010;</span>
+                                        <input type="text" id="quickTaskInput" placeholder="What&#8217;s your next move?">
+                                    </div>
+                                    <div id="quickTaskTypeChips" class="task-chip-row" role="group" aria-label="Task type">
+                                        <button type="button" class="task-filter-chip active" data-task-type-value="daily">Task</button>
+                                        <button type="button" class="task-filter-chip" data-task-type-value="long_term">Goal</button>
+                                    </div>
+                                    <div id="quickTaskPriorityChips" class="task-chip-row priority-chip-row" role="group" aria-label="Task priority">
+                                        <button type="button" class="task-priority-chip priority-high" data-priority-value="High">High</button>
+                                        <button type="button" class="task-priority-chip priority-medium active" data-priority-value="Medium">Medium</button>
+                                        <button type="button" class="task-priority-chip priority-low" data-priority-value="Low">Low</button>
+                                    </div>
+                                    <select id="quickTaskType" class="task-native-control" aria-label="Task type">
+                                        <option value="daily" selected>Task</option>
+                                        <option value="long_term">Goal</option>
+                                    </select>
+                                    <select id="quickTaskPriority" class="task-native-control" aria-label="Task priority">
+                                        <option value="High">High</option>
+                                        <option value="Medium" selected>Medium</option>
+                                        <option value="Low">Low</option>
+                                    </select>
+                                    <button type="submit" class="task-submit-button">Add</button>
+                                </form>
+                                <div class="task-box-scroll">
+                                    <div class="task-list-header">
+                                        <h3>Today</h3>
+                                        <span id="dailyTaskMeta" class="task-progress-meta"></span>
+                                    </div>
+                                    <div id="dailyTaskList" class="task-grid" aria-label="Today's tasks list"></div>
+                                    <div class="task-box-divider">
+                                        <span>Goals</span>
+                                        <span id="longTermTaskMeta" class="task-progress-meta"></span>
+                                    </div>
+                                    <div id="longTermTaskList" class="task-grid goals-grid" aria-label="Long-term goals list"></div>
+                                </div>
+                            </section>
                         </div>
-                        <form id="quickTaskForm" class="task-add-form compact-task-form">
-                            <input type="text" id="quickTaskInput" placeholder="+ Add task">
-                            <select id="quickTaskType" aria-label="Task type">
-                                <option value="daily" selected>Task</option>
-                                <option value="long_term">Goal</option>
-                            </select>
-                            <select id="quickTaskPriority" aria-label="Task priority">
-                                <option value="High">High</option>
-                                <option value="Medium" selected>Medium</option>
-                                <option value="Low">Low</option>
-                            </select>
-                            <button type="submit">Add</button>
-                        </form>
-                        <div class="task-box-scroll">
-                            <div class="task-list-header">
-                                <h3>Today</h3>
-                                <span id="dailyTaskMeta" class="task-progress-meta"></span>
-                            </div>
-                            <div id="dailyTaskList" class="task-grid" aria-label="Today's tasks list"></div>
-                            <div class="task-box-divider">
-                                <span>Goals</span>
-                                <span id="longTermTaskMeta" class="task-progress-meta"></span>
-                            </div>
-                            <div id="longTermTaskList" class="task-grid goals-grid" aria-label="Long-term goals list"></div>
-                        </div>
-                    </section>
 
-                    <section class="panel insights-panel mobile-card-section mobile-full-width-card">
-                        <div class="right-panel-header insights-heading">
-                            <div>
-                                <p class="panel-kicker">Activity</p>
-                                <h2>Workout &amp; Health</h2>
-                            </div>
-                            <button id="toggleInsights" type="button" class="ghost-button compact-toggle-button" aria-expanded="true">Collapse</button>
-                        </div>
-                        <div id="insightsBody" class="insights-body mobile-activity-stack">
-                            <section class="workout-section panel nested-insight-panel" aria-label="Workout and activity">
+                        <div class="health-section right-panel">
+                            <section class="workout-section workout-panel panel nested-insight-panel mobile-card-section mobile-full-width-card" aria-label="Workout and activity">
                                 <div class="right-panel-header">
                                     <p class="panel-kicker">Movement</p>
                                     <h3>Workout Log</h3>
@@ -236,7 +309,7 @@
                                 <div id="workoutList" class="workout-list"></div>
                             </section>
 
-                            <section class="panel health-panel nested-insight-panel">
+                            <section class="panel health-panel nested-insight-panel mobile-card-section mobile-full-width-card">
                                 <div class="panel-heading">
                                     <div>
                                         <p class="panel-kicker">BMI Guide</p>
@@ -251,104 +324,27 @@
                                 <div id="healthInsightResult" class="health-result" aria-live="polite"></div>
                             </section>
                         </div>
-                    </section>
+                    </div>
                 </div>
             </section>
         </main>
     </div>
 
-    <div class="bottom-nav" aria-label="Bottom navigation">
-        <div id="dashboardTab" class="nav-item active" onclick="showPage('dashboard')" role="button" tabindex="0" aria-label="Open dashboard page">
-            <span class="nav-icon" aria-hidden="true">&#127968;</span>
-            <span>Dashboard</span>
+    <div class="bottom-nav-glass" aria-label="Bottom navigation">
+        <div id="dashboardTab" class="nav-circle active" onclick="goDashboard()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goDashboard();}" role="button" tabindex="0" title="Dashboard" aria-label="Open dashboard page">
+            <span class="icon" aria-hidden="true">&#127968;</span>
         </div>
 
-        <div id="activityTab" class="nav-item" onclick="showPage('activity')" role="button" tabindex="0" aria-label="Open activity page">
-            <span class="nav-icon" aria-hidden="true">&#128202;</span>
-            <span>Activity</span>
-        </div>
-
-        <div class="nav-item ai-button" onclick="openAI()" role="button" tabindex="0" aria-label="Open AI assistant">
-            &#129302;
+        <div id="activityTab" class="nav-circle" onclick="goActivity()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goActivity();}" role="button" tabindex="0" title="Activity" aria-label="Open activity page">
+            <span class="icon" aria-hidden="true">&#128202;</span>
         </div>
     </div>
 
-    <section id="aiModal" class="ai-modal hidden" aria-hidden="true">
-        <div class="ai-modal-shell">
-            <div class="ai-modal-topbar">
-                <div>
-                    <p class="panel-kicker">Floating Assistant</p>
-                    <h2>AI Assistant</h2>
-                </div>
-                <div class="ai-modal-actions">
-                    <button id="infoButton" type="button" class="ghost-button ai-modal-info-button" aria-label="Open AI information" aria-haspopup="dialog" aria-controls="infoModal">
-                        Info
-                    </button>
-                    <button type="button" class="ghost-button ai-modal-close-button" onclick="closeAI()">Close</button>
-                </div>
-            </div>
-
-            <div class="ai-modal-body">
-                <div id="chatShell" class="chat-shell ai-modal-chat-shell">
-                    <button id="chatToggle" type="button" class="chat-toggle mobile-ai-hidden-toggle" aria-label="Open AI chat" aria-expanded="false"></button>
-
-                    <section id="chatWidget" class="chat-widget hidden ai-modal-chat-widget" aria-label="AI chatbot">
-                        <header class="chat-header">
-                            <div class="chat-brand">
-                                <span class="chat-avatar" aria-hidden="true"></span>
-                                <div>
-                                    <p class="chat-eyebrow">AI Assistant</p>
-                                    <h3>Neural Day Planner</h3>
-                                </div>
-                            </div>
-                            <button id="chatClose" class="chat-close" type="button" aria-label="Close chat">&times;</button>
-                        </header>
-
-                        <section class="chat-guide" aria-label="Suggested questions">
-                            <p class="chat-guide-label">Try one of these quick prompts</p>
-                            <div class="chat-suggestions">
-                                <button class="chat-suggestion" type="button" data-ai-action="focus" data-chat-question="What should I focus on first today based on my dashboard?">
-                                    What should I focus on today?
-                                </button>
-                                <button class="chat-suggestion" type="button" data-ai-action="study" data-chat-question="Use my sleep, energy, study, and tasks to help me plan the rest of today.">
-                                    Build my study plan
-                                </button>
-                                <button class="chat-suggestion" type="button" data-ai-action="energy" data-chat-question="Give me a short plan to raise my energy and stay productive today.">
-                                    Raise my energy
-                                </button>
-                                <button class="chat-suggestion" type="button" data-ai-action="evening" data-chat-question="Help me turn my remaining tasks into a calm step-by-step evening routine.">
-                                    Plan my evening
-                                </button>
-                            </div>
-                        </section>
-
-                        <div id="chatMessages" class="chat-messages ai-chat">
-                            {% if chat_history %}
-                                {% for message in chat_history %}
-                                    <div class="chat-message {{ 'user' if message.role == 'user' else 'bot' }}">
-                                        {% if message.role != 'user' %}
-                                            <span class="chat-avatar chat-avatar-inline" aria-hidden="true"></span>
-                                        {% endif %}
-                                        <div class="chat-bubble">{{ message.content }}</div>
-                                    </div>
-                                {% endfor %}
-                            {% else %}
-                                <div class="chat-message bot">
-                                    <span class="chat-avatar chat-avatar-inline" aria-hidden="true"></span>
-                                    <div class="chat-bubble">Hi, I am your AI assistant. Ask me for a plan, a task breakdown, or a better rhythm for the rest of your day.</div>
-                                </div>
-                            {% endif %}
-                        </div>
-
-                        <form id="chatForm" class="chat-form">
-                            <input type="text" id="chatInput" placeholder="Ask something..." autocomplete="off">
-                            <button type="submit">Send</button>
-                        </form>
-                    </section>
-                </div>
-            </div>
+    <div class="ai-widget ai-center-btn" onclick="openAI()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openAI();}" role="button" tabindex="0" aria-label="Open AI assistant">
+        <div class="ai-avatar" aria-hidden="true">
+            <img src="/static/images/ai-avatar.svg" alt="">
         </div>
-    </section>
+    </div>
 
     <section id="infoModal" class="info-modal hidden" aria-hidden="true">
         <div class="info-modal-backdrop" data-close-info-modal></div>

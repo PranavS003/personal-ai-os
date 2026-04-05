@@ -1,20 +1,8 @@
 (function () {
-    const chatShell = document.getElementById("chatShell");
-    const chatWidget = document.getElementById("chatWidget");
-    const chatToggle = document.getElementById("chatToggle");
     const infoButton = document.getElementById("infoButton");
     const infoModal = document.getElementById("infoModal");
     const energyModal = document.getElementById("energyModal");
-    const aiModal = document.getElementById("aiModal");
-
-    function syncChatShellState() {
-        const isOpen = Boolean(chatWidget && !chatWidget.classList.contains("hidden"));
-        chatShell?.classList.toggle("chat-open", isOpen);
-        chatToggle?.setAttribute("aria-expanded", isOpen ? "true" : "false");
-        aiModal?.classList.toggle("hidden", !isOpen);
-        aiModal?.setAttribute("aria-hidden", isOpen ? "false" : "true");
-        document.body.classList.toggle("ai-modal-open", isOpen);
-    }
+    const chatMessages = document.getElementById("chatMessages");
 
     function decorateWelcomeBubble() {
         const firstBotBubble = document.querySelector(".chat-message.bot .chat-bubble");
@@ -39,9 +27,9 @@
         infoModal.setAttribute("aria-hidden", "true");
     }
 
-    if (chatWidget) {
-        const observer = new MutationObserver(syncChatShellState);
-        observer.observe(chatWidget, { attributes: true, attributeFilter: ["class"] });
+    if (chatMessages) {
+        const observer = new MutationObserver(decorateWelcomeBubble);
+        observer.observe(chatMessages, { childList: true, subtree: true });
     }
 
     if (infoButton) {
@@ -67,11 +55,10 @@
             return;
         }
 
-        if (aiModal && !aiModal.classList.contains("hidden")) {
+        if (document.getElementById("chatShell")?.classList.contains("chat-open")) {
             window.personalAiDashboard?.closeAI?.();
         }
     });
 
-    syncChatShellState();
     decorateWelcomeBubble();
 })();
