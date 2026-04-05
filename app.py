@@ -1,16 +1,60 @@
 import json
+import importlib.util
 import logging
 import os
 import sqlite3
+import subprocess
 import sys
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from functools import wraps
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+REQUIREMENTS_FILE = Path(__file__).resolve().parent / "requirements.txt"
+
+
+def ensure_runtime_dependencies():
+    required_modules = {
+        "flask": "flask",
+        "dotenv": "python-dotenv",
+        "flask_login": "flask-login",
+    }
+    missing_modules = [
+        package_name
+        for module_name, package_name in required_modules.items()
+        if importlib.util.find_spec(module_name) is None
+    ]
+
+    if not missing_modules:
+        return
+
+    install_command = [sys.executable, "-m", "pip", "install"]
+    if REQUIREMENTS_FILE.exists():
+        install_command.extend(["-r", str(REQUIREMENTS_FILE)])
+    else:
+        install_command.extend(sorted(set(missing_modules)))
+
+    print(
+        f"Installing missing dependencies with: {' '.join(install_command)}",
+        file=sys.stderr,
+    )
+
+    try:
+        subprocess.check_call(install_command)
+    except Exception as exc:  # pragma: no cover - depends on runtime environment
+        raise RuntimeError(
+            "Required Python dependencies are missing. If you are using a virtual environment, "
+            "activate it first and rerun the app. Fallback: python -m pip install flask-login"
+        ) from exc
+
+
+ensure_runtime_dependencies()
+
 from dotenv import load_dotenv
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask_login import LoginManager, UserMixin, current_user, login_user, logout_user
 from jinja2 import TemplateNotFound
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -48,14 +92,25 @@ app = Flask(
     static_folder=str(STATIC_DIR),
     static_url_path="/static",
 )
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or "personal-ai-os-dev-secret"
+DEFAULT_SECRET_KEY = "personal-ai-os-dev-secret-change-me"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or DEFAULT_SECRET_KEY
 app.config.update(
+    SECRET_KEY=app.secret_key,
     PROPAGATE_EXCEPTIONS=False,
+    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    REMEMBER_COOKIE_DURATION=timedelta(days=7),
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE="Lax",
+    REMEMBER_COOKIE_SECURE=IS_PRODUCTION,
     TEMPLATES_AUTO_RELOAD=not IS_PRODUCTION,
 )
+
+login_manager = LoginManager()
+login_manager.login_view = "login"
+login_manager.init_app(app)
 
 
 def configure_logging(flask_app):
@@ -138,7 +193,9 @@ if not os.environ.get("GROQ_API_KEY"):
     app.logger.warning("GROQ_API_KEY is not set. AI routes will stay available but return safe fallback messages.")
 
 if not os.environ.get("FLASK_SECRET_KEY") and not os.environ.get("SECRET_KEY"):
-    app.logger.warning("FLASK_SECRET_KEY is not set. Using a development fallback secret; set a real secret in production.")
+    app.logger.warning(
+        "FLASK_SECRET_KEY is not set. Using a fixed development fallback secret; set a strong secret in production."
+    )
 
 CHAT_SESSIONS = {}
 MAX_CHAT_MESSAGES = 20
@@ -212,6 +269,21 @@ def get_today_string():
     return get_current_time().date().isoformat()
 
 
+@dataclass
+class DashboardUser(UserMixin):
+    id: str
+    username: str
+    email: str
+
+    @classmethod
+    def from_record(cls, record):
+        return cls(
+            id=str(record["id"]),
+            username=record["username"],
+            email=record["email"],
+        )
+
+
 def get_user_by_id(user_id):
     if not user_id:
         return None
@@ -234,6 +306,35 @@ def get_user_by_id(user_id):
         "email": row[2],
         "password_hash": row[3],
     }
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    record = get_user_by_id(user_id)
+    if not record:
+        return None
+    return DashboardUser.from_record(record)
+
+
+@app.before_request
+def keep_session_alive():
+    session.permanent = True
+
+    if current_user.is_authenticated:
+        try:
+            session["user_id"] = int(current_user.get_id())
+        except (TypeError, ValueError):
+            session.pop("user_id", None)
+
+
+def sign_in_user(user_record, remember=True):
+    login_user(
+        DashboardUser.from_record(user_record),
+        remember=remember,
+        duration=app.config["REMEMBER_COOKIE_DURATION"],
+    )
+    session["user_id"] = int(user_record["id"])
+    session.permanent = True
 
 
 def get_user_by_email(email):
@@ -330,6 +431,12 @@ def create_user_account(username, email, password):
 
 
 def get_current_user_id():
+    if current_user.is_authenticated:
+        try:
+            return int(current_user.get_id())
+        except (TypeError, ValueError):
+            return None
+
     try:
         return int(session.get("user_id"))
     except (TypeError, ValueError):
@@ -340,7 +447,7 @@ def get_current_user_record():
     return get_user_by_id(get_current_user_id())
 
 
-def get_current_user():
+def get_current_username():
     record = get_current_user_record()
     if not record:
         return None
@@ -354,7 +461,7 @@ def format_user_name(username):
 def login_required(view_func):
     @wraps(view_func)
     def wrapped_view(*args, **kwargs):
-        if not get_current_user():
+        if not get_current_username():
             return redirect(url_for("login"))
         return view_func(*args, **kwargs)
 
@@ -364,7 +471,7 @@ def login_required(view_func):
 def api_login_required(view_func):
     @wraps(view_func)
     def wrapped_view(*args, **kwargs):
-        if not get_current_user():
+        if not get_current_username():
             return jsonify({
                 "error": "Please log in to continue.",
                 "redirect_url": url_for("login"),
@@ -768,7 +875,7 @@ def ensure_daily_entries_schema(cursor):
 
 def get_today_entry(user=None):
     # Keep one onboarding entry per calendar day so refreshes skip setup after completion.
-    current_user = user or get_current_user()
+    current_user = user or get_current_username()
     if not current_user:
         return None
 
@@ -846,7 +953,7 @@ def get_today_study_hours(user=None):
 
 
 def get_today_workouts(user=None):
-    current_user = user or get_current_user()
+    current_user = user or get_current_username()
     if not current_user:
         return []
 
@@ -890,7 +997,7 @@ def get_today_exercise_minutes(user=None):
 
 def get_today_user_lookup(user=None, user_id=None):
     return {
-        "username": user or get_current_user(),
+        "username": user or get_current_username(),
         "user_id": user_id or get_current_user_id(),
         "today": get_today_string(),
     }
@@ -1236,7 +1343,7 @@ def build_dashboard_state(today_entry):
     if today_entry["tasks"] and not daily_tasks:
         sync_today_task_records(
             today_entry["tasks"],
-            get_current_user(),
+            get_current_username(),
             completed_lookup=today_entry["completed_tasks"],
         )
         daily_tasks = get_today_task_records()
@@ -1507,7 +1614,7 @@ def get_chat_session_id():
 
 
 def get_chat_history():
-    user = get_current_user() or "guest"
+    user = get_current_username() or "guest"
     chat_session_id = get_chat_session_id()
     history_key = f"{user}:{chat_session_id}"
     return CHAT_SESSIONS.setdefault(history_key, [])
@@ -1520,7 +1627,7 @@ def trim_chat_history(history):
 
 
 def get_dashboard_context():
-    current_user = get_current_user()
+    current_user = get_current_username()
     today_entry = get_today_entry(current_user)
     workouts = get_today_workouts(current_user)
     long_term_tasks = get_long_term_task_records(current_user)
@@ -1612,7 +1719,7 @@ def get_dashboard_context():
     )
 
 def set_study_hours_total(hours, user=None):
-    current_user = user or get_current_user()
+    current_user = user or get_current_username()
     if not current_user:
         raise RuntimeError("User session is missing.")
 
@@ -1635,7 +1742,7 @@ def set_study_hours_total(hours, user=None):
 
 
 def update_study_hours_total(action, value=None, user=None):
-    current_user = user or get_current_user()
+    current_user = user or get_current_username()
     if not current_user:
         raise RuntimeError("User session is missing.")
 
@@ -1748,12 +1855,12 @@ def login():
         user = get_user_by_email(email)
         if user and check_password_hash(user["password_hash"], password):
             session.clear()
-            session["user_id"] = user["id"]
+            sign_in_user(user, remember=True)
             return redirect(url_for("home"))
 
         return safe_render_template("login.html", error="Invalid credentials")
 
-    if get_current_user():
+    if get_current_username():
         return redirect(url_for("home"))
 
     return safe_render_template("login.html", error=None)
@@ -1776,10 +1883,12 @@ def register():
             )
 
         session.clear()
-        session["user_id"] = user_id
+        user_record = get_user_by_id(user_id)
+        if user_record:
+            sign_in_user(user_record, remember=True)
         return redirect(url_for("home"))
 
-    if get_current_user():
+    if get_current_username():
         return redirect(url_for("home"))
 
     return safe_render_template("register.html", error=None, form_data={"username": "", "email": ""})
@@ -1787,10 +1896,11 @@ def register():
 
 @app.route("/logout", methods=["GET", "POST"])
 def logout():
-    current_user = get_current_user() or "guest"
+    current_user = get_current_username() or "guest"
     chat_session_id = session.get("chat_session_id")
     if chat_session_id:
         CHAT_SESSIONS.pop(f"{current_user}:{chat_session_id}", None)
+    logout_user()
     session.clear()
     return redirect(url_for("login"))
 
@@ -1803,7 +1913,7 @@ def home():
 
     return safe_render_template(
         "onboarding.html",
-        current_user_display=format_user_name(get_current_user()),
+        current_user_display=format_user_name(get_current_username()),
         day_notice="New day started. Ready to plan?" if request.args.get("day_reset") == "1" else None,
     )
 
@@ -1821,14 +1931,14 @@ def dashboard():
         chat_history=get_chat_history(),
         today_entry=today_entry,
         dashboard_state=dashboard_state,
-        current_user_display=format_user_name(get_current_user()),
+        current_user_display=format_user_name(get_current_username()),
     )
 
 
 @app.route("/add_task", methods=["POST"])
 @api_login_required
 def add_task():
-    current_user = get_current_user()
+    current_user = get_current_username()
     data = request.get_json(silent=True) or {}
     task = (data.get("task") or "").strip()
     priority = normalize_priority(data.get("priority"))
@@ -1926,7 +2036,7 @@ def add_task():
 @app.route("/tasks", methods=["GET"])
 @api_login_required
 def get_tasks():
-    current_user = get_current_user()
+    current_user = get_current_username()
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
@@ -1960,7 +2070,7 @@ def get_tasks():
 @app.route("/delete_task/<int:task_id>", methods=["DELETE"])
 @api_login_required
 def delete_task(task_id):
-    current_user = get_current_user()
+    current_user = get_current_username()
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("UPDATE tasks SET is_cleared = 1 WHERE id = ? AND user = ?", (task_id, current_user))
@@ -1972,7 +2082,7 @@ def delete_task(task_id):
 @app.route("/add_habit", methods=["POST"])
 @api_login_required
 def add_habit():
-    current_user = get_current_user()
+    current_user = get_current_username()
     data = request.get_json(silent=True) or {}
     habit = (data.get("habit") or "").strip()
 
@@ -1991,7 +2101,7 @@ def add_habit():
 @app.route("/get_habits", methods=["GET"])
 @api_login_required
 def get_habits():
-    current_user = get_current_user()
+    current_user = get_current_username()
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("SELECT * FROM habits WHERE user = ? ORDER BY id DESC", (current_user,))
@@ -2004,7 +2114,7 @@ def get_habits():
 @app.route("/update_streak/<int:habit_id>", methods=["POST"])
 @api_login_required
 def update_streak(habit_id):
-    current_user = get_current_user()
+    current_user = get_current_username()
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("UPDATE habits SET streak = streak + 1 WHERE id = ? AND user = ?", (habit_id, current_user))
@@ -2017,7 +2127,7 @@ def update_streak(habit_id):
 @app.route("/get_stats", methods=["GET"])
 @api_login_required
 def get_stats():
-    current_user = get_current_user()
+    current_user = get_current_username()
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -2052,7 +2162,7 @@ def dashboard_data():
 @app.route("/log_study_progress", methods=["POST"])
 @api_login_required
 def log_study_progress():
-    current_user = get_current_user()
+    current_user = get_current_username()
     today_entry = get_today_entry()
     if not today_entry:
         return jsonify({"error": "Please complete today's setup first."}), 400
@@ -2087,7 +2197,7 @@ def update_study():
     value = data.get("value")
 
     try:
-        update_study_hours_total(action, value, get_current_user())
+        update_study_hours_total(action, value, get_current_username())
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     except RuntimeError as exc:
@@ -2102,7 +2212,7 @@ def update_study():
 @app.route("/update_day_metric", methods=["POST"])
 @api_login_required
 def update_day_metric():
-    current_user = get_current_user()
+    current_user = get_current_username()
     today_entry = get_today_entry(current_user)
     if not today_entry:
         return jsonify({"error": "Please complete today's setup first."}), 400
@@ -2164,7 +2274,7 @@ def update_day_metric():
 @app.route("/reset_day", methods=["POST"])
 @api_login_required
 def reset_day():
-    current_user = get_current_user()
+    current_user = get_current_username()
     today = get_today_string()
 
     conn = get_db_connection()
@@ -2197,7 +2307,7 @@ def reset_day():
 @app.route("/add_workout", methods=["POST"])
 @api_login_required
 def add_workout():
-    current_user = get_current_user()
+    current_user = get_current_username()
     today_entry = get_today_entry()
     if not today_entry:
         return jsonify({"error": "Please complete today's setup first."}), 400
@@ -2255,7 +2365,7 @@ def add_workout():
 @app.route("/toggle_task_status", methods=["POST"])
 @api_login_required
 def toggle_day_task():
-    current_user = get_current_user()
+    current_user = get_current_username()
     today_entry = get_today_entry()
     if not today_entry:
         return jsonify({"error": "Please complete today's setup first."}), 400
@@ -2358,7 +2468,7 @@ def toggle_day_task():
 @app.route("/submit_energy", methods=["POST"])
 @api_login_required
 def submit_energy():
-    current_user = get_current_user()
+    current_user = get_current_username()
     today_entry = get_today_entry()
     if not today_entry:
         return jsonify({"error": "Please complete today's setup first."}), 400
@@ -2410,7 +2520,7 @@ def submit_energy():
 @api_login_required
 def submit_day_data():
     # Save or replace today's setup in case the user re-submits before midnight.
-    current_user = get_current_user()
+    current_user = get_current_username()
     data = request.get_json(silent=True) or {}
 
     tasks = normalize_task_list(data.get("tasks") or [])

@@ -107,10 +107,9 @@ function renderWorkoutList(state) {
     const workouts = state.workouts || [];
     const totalMinutes = state.summary?.exercise_minutes ?? 0;
     const totalCalories = state.summary?.calories_burned ?? 0;
-    const goalMinutes = 30;
     const latestWorkout = workouts[0]?.activity_type;
 
-    totalCaloriesText.textContent = `${totalCalories} kcal burned today | ${totalMinutes} / ${goalMinutes} min active`;
+    totalCaloriesText.textContent = `${totalCalories} kcal burned today | ${totalMinutes} min active`;
 
     if (latestWorkout) {
         syncWorkoutPickerToValue(latestWorkout);
