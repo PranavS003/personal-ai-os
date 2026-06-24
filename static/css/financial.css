@@ -1,0 +1,543 @@
+/* Financial Wellness design tokens */
+.financial-page {
+    --financial-bg: #f8fafc;
+    --financial-card-bg: #ffffff;
+    --financial-primary: #1d4ed8;
+    --financial-primary-soft: #dbeafe;
+    --financial-text: #0f172a;
+    --financial-muted: #475569;
+    --financial-border: rgba(148, 163, 184, 0.18);
+    --financial-shadow: 0 18px 40px rgba(15, 23, 42, 0.07);
+    --financial-shadow-hover: 0 24px 52px rgba(15, 23, 42, 0.12);
+    display: grid;
+    gap: 18px;
+    padding-bottom: 120px;
+    color: var(--financial-text);
+    font-family: "Inter", system-ui, sans-serif;
+}
+
+/* Header */
+.financial-hero {
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(220px, 0.9fr);
+    gap: 18px;
+    padding: 24px;
+    border-radius: 20px;
+    background:
+        radial-gradient(circle at top right, rgba(219, 234, 254, 0.95), transparent 34%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
+}
+
+.financial-hero::after {
+    content: "";
+    position: absolute;
+    inset: auto -60px -80px auto;
+    width: 220px;
+    height: 220px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(59, 130, 246, 0.12), transparent 70%);
+    pointer-events: none;
+}
+
+.financial-hero-copy,
+.financial-hero-aside {
+    position: relative;
+    z-index: 1;
+}
+
+.financial-hero-copy {
+    display: grid;
+    gap: 10px;
+}
+
+.financial-hero-copy h1 {
+    margin: 0;
+    font-size: clamp(2rem, 4vw, 2.8rem);
+    line-height: 1.05;
+    letter-spacing: -0.04em;
+    color: var(--financial-text);
+}
+
+.financial-hero-badge {
+    width: fit-content;
+}
+
+.financial-hero-aside {
+    align-self: end;
+    display: grid;
+    gap: 8px;
+    padding: 18px;
+    border: 1px solid rgba(59, 130, 246, 0.12);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.82);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.financial-hero-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--financial-primary);
+}
+
+.financial-hero-aside strong {
+    font-size: 1.05rem;
+}
+
+.financial-hero-aside p {
+    margin: 0;
+    color: var(--financial-muted);
+    line-height: 1.6;
+}
+
+/* Dashboard grid */
+.financial-grid {
+    display: grid;
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.financial-card {
+    display: grid;
+    gap: 18px;
+    grid-column: span 6;
+    padding: 22px;
+    border-radius: 18px;
+    border: 1px solid var(--financial-border);
+    background: var(--financial-card-bg);
+    box-shadow: var(--financial-shadow);
+    transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease;
+}
+
+.financial-card:hover,
+.financial-card:focus-within {
+    transform: translateY(-3px);
+    border-color: rgba(59, 130, 246, 0.22);
+    box-shadow: var(--financial-shadow-hover);
+}
+
+.financial-card--wide {
+    grid-column: span 7;
+}
+
+.financial-card--highlight {
+    grid-column: span 5;
+    background:
+        linear-gradient(180deg, rgba(219, 234, 254, 0.72), rgba(255, 255, 255, 0.98)),
+        #ffffff;
+    border-color: rgba(59, 130, 246, 0.18);
+}
+
+.financial-card--summary {
+    grid-column: span 12;
+}
+
+.financial-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.financial-card h2 {
+    margin: 6px 0 0;
+    font-size: 1.35rem;
+    line-height: 1.2;
+    letter-spacing: -0.03em;
+    color: var(--financial-text);
+}
+
+/* Net worth card */
+.financial-worth-card {
+    align-content: start;
+}
+
+.financial-worth-metric {
+    display: grid;
+    gap: 6px;
+}
+
+.financial-worth-label,
+.financial-summary-label,
+.financial-suggestion-label,
+.financial-ai-meta,
+.financial-legend-item,
+.financial-progress-head,
+.financial-instrument-copy p,
+.financial-form-message,
+.financial-field label {
+    color: var(--financial-muted);
+}
+
+.financial-worth-metric strong {
+    font-size: clamp(2rem, 4vw, 2.6rem);
+    letter-spacing: -0.04em;
+}
+
+.financial-trend-pill,
+.financial-summary-pill,
+.financial-status-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 999px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.financial-trend-pill.positive,
+.financial-summary-pill {
+    color: var(--financial-primary);
+    background: rgba(219, 234, 254, 0.88);
+}
+
+.financial-budget-block {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 16px;
+    background: var(--financial-bg);
+}
+
+.financial-budget-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.financial-budget-head h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.financial-budget-head span {
+    color: var(--financial-muted);
+    font-size: 0.9rem;
+}
+
+.financial-budget-bar {
+    display: grid;
+    grid-template-columns: 5fr 3fr 2fr;
+    min-height: 16px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(226, 232, 240, 0.9);
+}
+
+.financial-budget-segment {
+    height: 100%;
+}
+
+.financial-budget-segment.needs,
+.financial-dot.needs {
+    background: #1d4ed8;
+}
+
+.financial-budget-segment.wants,
+.financial-dot.wants {
+    background: #60a5fa;
+}
+
+.financial-budget-segment.savings,
+.financial-dot.savings {
+    background: #93c5fd;
+}
+
+.financial-budget-legend {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.financial-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.financial-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+/* AI coach card */
+.financial-ai-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.financial-ai-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: rgba(29, 78, 216, 0.12);
+    font-size: 1.4rem;
+}
+
+.financial-insight-text {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.75;
+    color: #1e3a8a;
+}
+
+.financial-ai-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.financial-action-button {
+    min-width: 132px;
+}
+
+.financial-card--highlight.is-emphasized {
+    box-shadow:
+        0 26px 48px rgba(37, 99, 235, 0.16),
+        inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+/* Instruments card */
+.financial-instrument-list {
+    display: grid;
+    gap: 12px;
+}
+
+.financial-instrument-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    background: linear-gradient(180deg, rgba(248, 250, 252, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.financial-instrument-copy {
+    display: grid;
+    gap: 5px;
+}
+
+.financial-instrument-copy strong {
+    font-size: 1rem;
+}
+
+.financial-instrument-copy p {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.financial-status-pill.active {
+    background: rgba(219, 234, 254, 0.9);
+    color: var(--financial-primary);
+}
+
+.financial-status-pill.due {
+    background: rgba(254, 240, 138, 0.5);
+    color: #a16207;
+}
+
+.financial-status-pill.growing {
+    background: rgba(220, 252, 231, 0.9);
+    color: #15803d;
+}
+
+/* Expense logger */
+.financial-form {
+    display: grid;
+    gap: 14px;
+}
+
+.financial-field {
+    display: grid;
+    gap: 8px;
+}
+
+.financial-field label {
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+.financial-field input,
+.financial-field select {
+    width: 100%;
+    min-height: 46px;
+    padding: 0 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: #ffffff;
+    color: var(--financial-text);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.financial-field input:focus,
+.financial-field select:focus {
+    outline: none;
+    border-color: rgba(29, 78, 216, 0.36);
+    box-shadow: 0 0 0 4px rgba(219, 234, 254, 0.88);
+    background: #ffffff;
+}
+
+.financial-submit-button {
+    min-height: 46px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #1d4ed8, #2563eb);
+    color: #ffffff;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    box-shadow: 0 16px 28px rgba(29, 78, 216, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.financial-submit-button:hover,
+.financial-submit-button:focus-visible {
+    transform: translateY(-1px);
+    filter: brightness(1.02);
+    box-shadow: 0 18px 34px rgba(29, 78, 216, 0.24);
+}
+
+.financial-form-message {
+    margin: 0;
+    min-height: 24px;
+    font-size: 0.92rem;
+    line-height: 1.6;
+}
+
+.financial-form-message.is-success {
+    color: #047857;
+}
+
+.financial-form-message.is-error {
+    color: #b91c1c;
+}
+
+/* Monthly summary */
+.financial-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+}
+
+.financial-summary-stat {
+    display: grid;
+    gap: 6px;
+    padding: 18px;
+    border-radius: 16px;
+    background: var(--financial-bg);
+}
+
+.financial-summary-stat strong {
+    font-size: 1.4rem;
+    letter-spacing: -0.03em;
+}
+
+.financial-progress-block {
+    display: grid;
+    gap: 10px;
+}
+
+.financial-progress-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.financial-progress-track {
+    position: relative;
+    min-height: 12px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(226, 232, 240, 0.9);
+}
+
+.financial-progress-fill {
+    display: block;
+    width: 76%;
+    height: 12px;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #1d4ed8, #60a5fa);
+}
+
+.financial-suggestion-box {
+    display: grid;
+    gap: 8px;
+    padding: 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(59, 130, 246, 0.14);
+    background: linear-gradient(180deg, rgba(219, 234, 254, 0.42), rgba(255, 255, 255, 0.96));
+}
+
+.financial-suggestion-box p {
+    margin: 0;
+    font-size: 1rem;
+    line-height: 1.65;
+    color: var(--financial-text);
+}
+
+/* Responsive behavior */
+@media (max-width: 1024px) {
+    .financial-hero,
+    .financial-card--wide,
+    .financial-card--highlight,
+    .financial-card,
+    .financial-card--summary {
+        grid-template-columns: 1fr;
+        grid-column: span 12;
+    }
+}
+
+@media (max-width: 720px) {
+    .financial-page {
+        gap: 16px;
+        padding-bottom: 110px;
+    }
+
+    .financial-hero {
+        padding: 20px;
+    }
+
+    .financial-card {
+        padding: 18px;
+        border-radius: 16px;
+    }
+
+    .financial-card-head,
+    .financial-ai-footer,
+    .financial-budget-head,
+    .financial-instrument-item {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .financial-budget-legend,
+    .financial-summary-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .financial-action-button,
+    .financial-submit-button {
+        width: 100%;
+    }
+}

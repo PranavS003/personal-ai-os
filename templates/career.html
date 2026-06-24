@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Career &amp; Growth | Personal AI OS</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <style>
+        .career-page {
+            display: grid;
+            gap: 18px;
+        }
+
+        .career-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .career-section-head {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .career-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 16px;
+        }
+
+        .career-card {
+            display: grid;
+            gap: 16px;
+            min-height: 320px;
+        }
+
+        .career-card-copy {
+            display: grid;
+            gap: 6px;
+        }
+
+        .career-card-copy h2 {
+            margin: 0;
+        }
+
+        .career-form,
+        .career-study-form {
+            display: grid;
+            gap: 10px;
+        }
+
+        .career-form-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
+
+        .career-field {
+            display: grid;
+            gap: 6px;
+        }
+
+        .career-field label,
+        .skill-label-row,
+        .study-summary-row,
+        .career-row-title {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: var(--muted);
+        }
+
+        .career-form input,
+        .career-form select,
+        .career-study-form input {
+            width: 100%;
+            min-height: 44px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid rgba(122, 144, 230, 0.22);
+            background: rgba(255, 255, 255, 0.82);
+            color: var(--text);
+        }
+
+        .career-form input:focus,
+        .career-form select:focus,
+        .career-study-form input:focus,
+        .skill-slider:focus {
+            outline: 2px solid rgba(37, 99, 235, 0.2);
+            border-color: rgba(37, 99, 235, 0.4);
+        }
+
+        .career-list,
+        .skill-list,
+        .ai-prep-actions {
+            display: grid;
+            gap: 10px;
+        }
+
+        .career-list {
+            max-height: 220px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .pipeline-form-shell {
+            display: grid;
+            gap: 12px;
+            overflow: hidden;
+            transition: max-height 0.28s ease, opacity 0.28s ease, transform 0.28s ease;
+        }
+
+        .pipeline-form-shell.hidden {
+            max-height: 0;
+            opacity: 0;
+            transform: translateY(-8px);
+            pointer-events: none;
+        }
+
+        .pipeline-form-shell:not(.hidden) {
+            max-height: 420px;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .career-list-item,
+        .skill-item,
+        .study-summary,
+        .ai-response {
+            border: 1px solid rgba(122, 144, 230, 0.16);
+            background: rgba(255, 255, 255, 0.54);
+            border-radius: 16px;
+            padding: 14px 16px;
+        }
+
+        .career-list-item {
+            display: grid;
+            gap: 10px;
+        }
+
+        .career-list-header,
+        .study-summary-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .career-list-header strong,
+        .skill-name {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .career-meta,
+        .empty-state,
+        .ai-response,
+        .study-note {
+            margin: 0;
+            color: var(--muted);
+            line-height: 1.6;
+        }
+
+        .career-status {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 7px 11px;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .career-status.applied {
+            color: #1d4ed8;
+            background: rgba(59, 130, 246, 0.14);
+        }
+
+        .career-status.in-progress {
+            color: #b45309;
+            background: rgba(245, 158, 11, 0.18);
+        }
+
+        .career-status.completed {
+            color: #047857;
+            background: rgba(16, 185, 129, 0.16);
+        }
+
+        .skill-item {
+            display: grid;
+            gap: 10px;
+        }
+
+        .skill-label-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .skill-toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .skill-toggle-label {
+            font-size: 0.84rem;
+            color: var(--muted);
+        }
+
+        .skill-toggle {
+            width: 18px;
+            height: 18px;
+            accent-color: #2563eb;
+        }
+
+        .career-study-form {
+            grid-template-columns: 1fr;
+        }
+
+        .study-summary {
+            display: grid;
+            gap: 10px;
+        }
+
+        .study-subject-composer {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            gap: 10px;
+            align-items: end;
+        }
+
+        .study-subject-chips,
+        .study-subject-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .study-subject-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(122, 144, 230, 0.18);
+            background: rgba(255, 255, 255, 0.68);
+            color: var(--text);
+            font-size: 0.84rem;
+            font-weight: 600;
+        }
+
+        .study-subject-remove {
+            border: none;
+            background: transparent;
+            color: var(--muted);
+            box-shadow: none;
+            padding: 0;
+            min-width: auto;
+            min-height: auto;
+            cursor: pointer;
+        }
+
+        .study-subject-remove:hover,
+        .study-subject-remove:focus-visible {
+            transform: none;
+            box-shadow: none;
+            color: var(--text);
+        }
+
+        .study-hours-value {
+            font-size: 1.8rem;
+            font-weight: 800;
+            color: var(--text);
+            line-height: 1;
+        }
+
+        .ai-prep-actions {
+            grid-template-columns: 1fr;
+        }
+
+        .ai-prep-button {
+            width: 100%;
+            justify-content: center;
+        }
+
+        .career-feedback {
+            min-height: 20px;
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--muted);
+        }
+
+        .career-feedback.error {
+            color: #b91c1c;
+        }
+
+        .career-feedback.success {
+            color: #047857;
+        }
+
+        @media (max-width: 900px) {
+            .career-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 640px) {
+            .career-form-grid,
+            .career-study-form,
+            .study-subject-composer {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body class="page-fade ai-os-page modern-dashboard-page">
+    <div class="page-shell">
+        <div class="ambient ambient-one"></div>
+        <div class="ambient ambient-two"></div>
+        <div class="ambient ambient-three"></div>
+
+        <main class="app mobile-app-shell">
+            <section class="mobile-app-frame">
+                <div class="mobile-page career-page">
+                    <section class="panel workspace-topbar mobile-hero-panel">
+                        <div>
+                            <p class="panel-kicker">Career &amp; Growth</p>
+                            <h1>{{ username }}, keep your next step visible</h1>
+                            <p class="hero-text">Track applications, maintain core skill focus, log study time, and jump into quick AI prep from one simple workspace.</p>
+                        </div>
+                        <div class="career-toolbar">
+                            <a href="{{ url_for('dashboard') }}" class="ghost-button logout-link" role="button">Back to Dashboard</a>
+                            <a href="{{ url_for('logout') }}" class="ghost-button logout-link" role="button">Logout</a>
+                        </div>
+                    </section>
+
+                    <section class="career-grid">
+                        <article class="panel mobile-card-section career-card">
+                            <div class="career-section-head">
+                                <div class="career-card-copy">
+                                    <p class="panel-kicker">Placement Tracker</p>
+                                    <h2>Active Pipeline</h2>
+                                    <p class="hero-text">Keep the list clean and open the form only when you need it.</p>
+                                </div>
+                                <button id="togglePipelineForm" type="button" class="ghost-button">Add Application</button>
+                            </div>
+
+                            <div id="pipelineFormShell" class="pipeline-form-shell hidden">
+                                <form id="pipelineForm" class="career-form">
+                                    <div class="career-form-grid">
+                                        <div class="career-field">
+                                            <label for="companyName">Company Name</label>
+                                            <input id="companyName" name="company_name" type="text" placeholder="e.g. Infosys" required>
+                                        </div>
+                                        <div class="career-field">
+                                            <label for="roleName">Role</label>
+                                            <input id="roleName" name="role" type="text" placeholder="e.g. Software Engineer" required>
+                                        </div>
+                                    </div>
+                                    <div class="career-form-grid">
+                                        <div class="career-field">
+                                            <label for="applicationStatus">Status</label>
+                                            <select id="applicationStatus" name="status" required>
+                                                <option value="Applied">Applied</option>
+                                                <option value="In Progress">In Progress</option>
+                                                <option value="Completed">Completed</option>
+                                            </select>
+                                        </div>
+                                        <div class="career-field">
+                                            <label for="nextAction">Next Action</label>
+                                            <input id="nextAction" name="next_action" type="text" placeholder="e.g. Prepare HR answers" required>
+                                        </div>
+                                    </div>
+                                    <button type="submit">Save Application</button>
+                                </form>
+                            </div>
+
+                            <div id="pipelineList" class="career-list" aria-live="polite"></div>
+                        </article>
+
+                        <article class="panel mobile-card-section career-card">
+                            <div class="career-card-copy">
+                                <p class="panel-kicker">Today's Subjects</p>
+                                <h2>Skill Focus</h2>
+                                <p class="hero-text">Only the subjects from your Study Tracker appear here. Mark what you studied today.</p>
+                            </div>
+
+                            <div id="skillList" class="skill-list" aria-live="polite"></div>
+
+                            <button id="saveSkillsButton" type="button">Save Studied Today</button>
+                        </article>
+
+                        <article class="panel mobile-card-section career-card">
+                            <div class="career-card-copy">
+                                <p class="panel-kicker">Daily Study</p>
+                                <h2>Study Tracker</h2>
+                                <p class="hero-text">Log today’s hours and keep a simple weekly total in view.</p>
+                            </div>
+
+                            <form id="studyForm" class="career-form career-study-form">
+                                <div class="career-form-grid">
+                                    <div class="career-field">
+                                        <label for="studyHoursInput">Study Hours</label>
+                                        <input id="studyHoursInput" name="study_hours" type="number" min="0" max="24" step="0.5" placeholder="0">
+                                    </div>
+                                    <div class="career-field">
+                                        <label for="targetHoursInput">Target Hours</label>
+                                        <input id="targetHoursInput" name="target_hours" type="number" min="0.5" max="24" step="0.5" placeholder="4">
+                                    </div>
+                                </div>
+                                <div class="study-subject-composer">
+                                    <div class="career-field">
+                                        <label for="subjectInput">Add Subject</label>
+                                        <input id="subjectInput" type="text" placeholder="e.g. DBMS">
+                                    </div>
+                                    <button id="addSubjectButton" type="button" class="ghost-button">Add Subject</button>
+                                </div>
+                                <div id="studySubjectChips" class="study-subject-chips" aria-live="polite"></div>
+                                <button type="submit">Save Study Update</button>
+                            </form>
+
+                            <div class="study-summary">
+                                <div class="study-summary-row">
+                                    <span>Today</span>
+                                    <span id="todayStudyValue" class="study-hours-value">0h</span>
+                                </div>
+                                <div class="study-summary-row">
+                                    <span>This Week</span>
+                                    <strong id="weeklyStudyValue">0h</strong>
+                                </div>
+                                <div class="study-summary-row">
+                                    <span>Target</span>
+                                    <strong id="targetStudyValue">4h</strong>
+                                </div>
+                                <div>
+                                    <div class="career-row-title">Today's Subjects</div>
+                                    <div id="studySubjectList" class="study-subject-list" aria-live="polite"></div>
+                                </div>
+                                <p class="study-note">Small daily updates are enough. You can overwrite today’s value anytime.</p>
+                            </div>
+                        </article>
+
+                        <article class="panel mobile-card-section career-card">
+                            <div class="career-card-copy">
+                                <p class="panel-kicker">Action Center</p>
+                                <h2>Quick AI Prep</h2>
+                                <p class="hero-text">Use one tap to start a practice prompt through your existing AI route.</p>
+                            </div>
+
+                            <div class="ai-prep-actions">
+                                <button type="button" class="ai-prep-button" data-ai-prompt="Start a mock interview for a software engineering placement round. Ask one question at a time and wait for my answer.">Start Mock Interview</button>
+                                <button type="button" class="ai-prep-button ghost-button" data-ai-prompt="Give me one coding interview question for placement preparation. Include the expected approach after I try it.">Give Coding Question</button>
+                                <button type="button" class="ai-prep-button ghost-button" data-ai-prompt="Start GD practice for campus placements. Give one topic and help me structure my speaking points.">Start GD Practice</button>
+                            </div>
+
+                            <div id="aiPrepResponse" class="ai-response" aria-live="polite">Choose an action to get a quick prompt or fallback guidance.</div>
+                        </article>
+                    </section>
+
+                    <p id="careerFeedback" class="career-feedback" aria-live="polite"></p>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    {% include 'components/bottom_nav.html' %}
+
+    <script>
+        window.careerState = {{ career_state|tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='js/career.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,194 @@
+<div class="financial-page" data-financial-root>
+    <!-- Header Section -->
+    <section class="panel workspace-topbar mobile-hero-panel financial-hero">
+        <div class="financial-hero-copy">
+            <span class="panel-pill highlight-pill financial-hero-badge">AI Powered Insights</span>
+            <p class="panel-kicker">Financial Wellness</p>
+            <h1>Financial Wellness</h1>
+            <p class="hero-text">Track your money, improve habits, and grow your future.</p>
+        </div>
+
+        <div class="financial-hero-aside" aria-label="This month's focus">
+            <span class="financial-hero-label">April Focus</span>
+            <strong>Smarter daily spending</strong>
+            <p>Small habit shifts today can create stronger savings momentum next month.</p>
+        </div>
+    </section>
+
+    <!-- Main Dashboard Grid -->
+    <section class="financial-grid" aria-label="Financial wellness dashboard">
+        <!-- Card 1: Net Worth Overview -->
+        <article class="panel mobile-card-section financial-card financial-card--wide financial-worth-card">
+            <div class="financial-card-head">
+                <div>
+                    <p class="panel-kicker">Overview</p>
+                    <h2>Net Worth Overview</h2>
+                </div>
+                <span class="financial-trend-pill positive">+&#8377;2,000 this month</span>
+            </div>
+
+            <div class="financial-worth-metric">
+                <span class="financial-worth-label">Total Balance</span>
+                <strong>&#8377;45,000</strong>
+            </div>
+
+            <div class="financial-budget-block">
+                <div class="financial-budget-head">
+                    <h3>50 / 30 / 20 Budget Rule</h3>
+                    <span>Balanced this month</span>
+                </div>
+
+                <div class="financial-budget-bar" aria-label="Budget allocation">
+                    <span class="financial-budget-segment needs" title="Needs 50%"></span>
+                    <span class="financial-budget-segment wants" title="Wants 30%"></span>
+                    <span class="financial-budget-segment savings" title="Savings 20%"></span>
+                </div>
+
+                <div class="financial-budget-legend" aria-label="Budget labels">
+                    <div class="financial-legend-item">
+                        <span class="financial-dot needs"></span>
+                        <span>Needs 50%</span>
+                    </div>
+                    <div class="financial-legend-item">
+                        <span class="financial-dot wants"></span>
+                        <span>Wants 30%</span>
+                    </div>
+                    <div class="financial-legend-item">
+                        <span class="financial-dot savings"></span>
+                        <span>Savings 20%</span>
+                    </div>
+                </div>
+            </div>
+        </article>
+
+        <!-- Card 2: AI Financial Coach -->
+        <article class="panel mobile-card-section financial-card financial-card--highlight">
+            <div class="financial-card-head">
+                <div class="financial-ai-title">
+                    <span class="financial-ai-icon" aria-hidden="true">&#129302;</span>
+                    <div>
+                        <p class="panel-kicker">AI Financial Coach</p>
+                        <h2>Personalized Insight</h2>
+                    </div>
+                </div>
+            </div>
+
+            <p id="financialInsightText" class="financial-insight-text">
+                AI Insight: Your spending on food is slightly high this week. Consider reducing Swiggy orders and redirecting &#8377;500 into savings.
+            </p>
+
+            <div class="financial-ai-footer">
+                <span id="financialAdviceMeta" class="financial-ai-meta">Focused on your weekly habits</span>
+                <button id="financialAdviceButton" type="button" class="ghost-button financial-action-button">Get Advice</button>
+            </div>
+        </article>
+
+        <!-- Card 3: Financial Instruments Tracker -->
+        <article class="panel mobile-card-section financial-card">
+            <div class="financial-card-head">
+                <div>
+                    <p class="panel-kicker">Instruments</p>
+                    <h2>Financial Instruments Tracker</h2>
+                </div>
+            </div>
+
+            <div class="financial-instrument-list" role="list" aria-label="Financial instruments">
+                <article class="financial-instrument-item" role="listitem">
+                    <div class="financial-instrument-copy">
+                        <strong>South Indian Bank Account</strong>
+                        <p>&#8377;20,000 available balance</p>
+                    </div>
+                    <span class="financial-status-pill active">Active</span>
+                </article>
+
+                <article class="financial-instrument-item" role="listitem">
+                    <div class="financial-instrument-copy">
+                        <strong>Health Insurance</strong>
+                        <p>Renewal in 14 days</p>
+                    </div>
+                    <span class="financial-status-pill due">Due</span>
+                </article>
+
+                <article class="financial-instrument-item" role="listitem">
+                    <div class="financial-instrument-copy">
+                        <strong>Mutual Fund SIP</strong>
+                        <p>&#8377;2,000/month contribution</p>
+                    </div>
+                    <span class="financial-status-pill growing">Growing</span>
+                </article>
+            </div>
+        </article>
+
+        <!-- Card 4: Quick Expense Logger -->
+        <article class="panel mobile-card-section financial-card">
+            <div class="financial-card-head">
+                <div>
+                    <p class="panel-kicker">Quick Action</p>
+                    <h2>Quick Expense Logger</h2>
+                </div>
+            </div>
+
+            <form id="expenseLoggerForm" class="financial-form" novalidate>
+                <div class="financial-field">
+                    <label for="expenseAmount">Amount (&#8377;)</label>
+                    <input id="expenseAmount" name="amount" type="number" min="1" step="1" placeholder="Enter amount">
+                </div>
+
+                <div class="financial-field">
+                    <label for="expenseCategory">Category</label>
+                    <select id="expenseCategory" name="category">
+                        <option value="">Select category</option>
+                        <option value="Food">Food</option>
+                        <option value="Travel">Travel</option>
+                        <option value="Utilities">Utilities</option>
+                        <option value="Subscriptions">Subscriptions</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="financial-submit-button">Log Expense</button>
+            </form>
+
+            <p id="expenseLoggerMessage" class="financial-form-message" aria-live="polite">
+                Add a recent expense to keep your weekly pattern accurate.
+            </p>
+        </article>
+
+        <!-- Card 5: Monthly Insight Summary -->
+        <article class="panel mobile-card-section financial-card financial-card--summary">
+            <div class="financial-card-head">
+                <div>
+                    <p class="panel-kicker">Monthly Summary</p>
+                    <h2>Monthly Insight Summary</h2>
+                </div>
+                <span class="financial-summary-pill">April Snapshot</span>
+            </div>
+
+            <div class="financial-summary-grid">
+                <div class="financial-summary-stat">
+                    <span class="financial-summary-label">Saved this month</span>
+                    <strong>&#8377;3,200</strong>
+                </div>
+
+                <div class="financial-summary-stat">
+                    <span class="financial-summary-label">Top spending</span>
+                    <strong>Food (42%)</strong>
+                </div>
+            </div>
+
+            <div class="financial-progress-block">
+                <div class="financial-progress-head">
+                    <span>Savings progress</span>
+                    <span>76%</span>
+                </div>
+                <div class="financial-progress-track" aria-hidden="true">
+                    <span class="financial-progress-fill"></span>
+                </div>
+            </div>
+
+            <div class="financial-suggestion-box">
+                <span class="financial-suggestion-label">Suggestion</span>
+                <p>Try to increase savings by &#8377;1,000 next month.</p>
+            </div>
+        </article>
+    </section>
+</div>

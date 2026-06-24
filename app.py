@@ -1,16 +1,18 @@
 import json
+import hashlib
 import importlib.util
-import logging
 import os
+import secrets
+import smtplib
 import sqlite3
 import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
-from functools import wraps
+from datetime import date, timedelta
+from email.message import EmailMessage
 from pathlib import Path
-from zoneinfo import ZoneInfo
+
 
 REQUIREMENTS_FILE = Path(__file__).resolve().parent / "requirements.txt"
 
@@ -52,39 +54,55 @@ def ensure_runtime_dependencies():
 
 ensure_runtime_dependencies()
 
-from dotenv import load_dotenv
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, flash, jsonify, redirect, request, session, url_for
 from flask_login import LoginManager, UserMixin, current_user, login_user, logout_user
-from jinja2 import TemplateNotFound
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
+
+from config import (
+    AI_MODEL,
+    CAREER_STATUSES,
+    DEFAULT_SECRET_KEY,
+    ENERGY_QUESTION_COUNT,
+    FLASK_CONFIG,
+    MAX_CHAT_MESSAGES,
+    STATIC_DIR,
+    TEMPLATES_DIR,
+    WORKOUT_CALORIE_RATES,
+)
+from database.db import get_db_connection, init_db
+from utils.calculations import (
+    build_health_guidance,
+    calculate_health_insight,
+    compute_streak_from_history,
+    generate_daily_plan,
+    generate_start_day_plan,
+)
+from utils.helpers import (
+    api_login_required,
+    configure_logging,
+    format_progress_value,
+    format_user_name,
+    get_current_time,
+    get_today_string,
+    handle_uncaught_exception,
+    login_required,
+    normalize_career_text,
+    normalize_date_history,
+    normalize_priority,
+    normalize_study_subjects,
+    normalize_task_list,
+    parse_exercise_value,
+    parse_iso_date,
+    prepare_runtime_paths,
+    safe_render_template,
+    set_app_logger,
+)
 
 try:
     from openai import OpenAI
 except ImportError:  # pragma: no cover - depends on deployment environment
     OpenAI = None
-
-BASE_DIR = Path(__file__).resolve().parent
-TEMPLATES_DIR = BASE_DIR / "templates"
-STATIC_DIR = BASE_DIR / "static"
-STATIC_CSS_DIR = STATIC_DIR / "css"
-STATIC_JS_DIR = STATIC_DIR / "js"
-ENV_PATH = BASE_DIR / ".env"
-
-load_dotenv(dotenv_path=ENV_PATH)
-
-# ✅ ADD THIS PART HERE
-def resolve_runtime_path(value, default_name):
-    raw_path = Path(value) if value else (BASE_DIR / default_name)
-    if not raw_path.is_absolute():
-        raw_path = BASE_DIR / raw_path
-    return raw_path
-
-DATABASE_FILE = resolve_runtime_path(os.environ.get("PERSONAL_AI_OS_DB"), "database.db")
-APP_TIMEZONE = os.environ.get("PERSONAL_AI_OS_TIMEZONE", "Asia/Kolkata")
-
-# ✅ THEN use it here
-IS_PRODUCTION = bool(os.environ.get("RENDER")) or os.environ.get("FLASK_ENV", "production").lower() == "production"
 
 app = Flask(
     __name__,
@@ -92,102 +110,19 @@ app = Flask(
     static_folder=str(STATIC_DIR),
     static_url_path="/static",
 )
-DEFAULT_SECRET_KEY = "personal-ai-os-dev-secret-change-me"
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or DEFAULT_SECRET_KEY
-app.config.update(
-    SECRET_KEY=app.secret_key,
-    PROPAGATE_EXCEPTIONS=False,
-    PERMANENT_SESSION_LIFETIME=timedelta(days=7),
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=IS_PRODUCTION,
-    REMEMBER_COOKIE_DURATION=timedelta(days=7),
-    REMEMBER_COOKIE_HTTPONLY=True,
-    REMEMBER_COOKIE_SAMESITE="Lax",
-    REMEMBER_COOKIE_SECURE=IS_PRODUCTION,
-    TEMPLATES_AUTO_RELOAD=not IS_PRODUCTION,
-)
+app.config.update(SECRET_KEY=app.secret_key, **FLASK_CONFIG)
 
 login_manager = LoginManager()
 login_manager.login_view = "login"
+login_manager.login_message = "Please log in to continue."
 login_manager.init_app(app)
 
 
-def configure_logging(flask_app):
-    formatter = logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s")
-    gunicorn_logger = logging.getLogger("gunicorn.error")
-    root_logger = logging.getLogger()
-
-    if gunicorn_logger.handlers:
-        flask_app.logger.handlers = gunicorn_logger.handlers
-        flask_app.logger.setLevel(gunicorn_logger.level or logging.INFO)
-        root_logger.handlers = gunicorn_logger.handlers
-        root_logger.setLevel(gunicorn_logger.level or logging.INFO)
-    else:
-        stream_handler = logging.StreamHandler(sys.stdout)
-        stream_handler.setFormatter(formatter)
-
-        if not root_logger.handlers:
-            root_logger.addHandler(stream_handler)
-        else:
-            for handler in root_logger.handlers:
-                handler.setFormatter(formatter)
-
-        root_logger.setLevel(logging.INFO)
-        flask_app.logger.handlers = root_logger.handlers
-        flask_app.logger.setLevel(root_logger.level)
-
-    flask_app.logger.propagate = False
-    logging.captureWarnings(True)
-
-
-def handle_uncaught_exception(exc_type, exc_value, exc_traceback):
-    if issubclass(exc_type, KeyboardInterrupt):
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-
-    logging.getLogger("personal_ai_os").critical(
-        "Uncaught exception during startup/runtime.",
-        exc_info=(exc_type, exc_value, exc_traceback),
-    )
-
-
-def ensure_directory(path, label):
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except Exception:  # pragma: no cover - depends on filesystem/runtime
-        app.logger.exception("Unable to prepare %s at %s", label, path)
-
-
-def prepare_runtime_paths():
-    ensure_directory(TEMPLATES_DIR, "templates directory")
-    ensure_directory(STATIC_DIR, "static directory")
-    ensure_directory(STATIC_CSS_DIR, "static css directory")
-    ensure_directory(STATIC_JS_DIR, "static js directory")
-    ensure_directory(DATABASE_FILE.parent, "database directory")
-
-    for template_name in ("index.html", "login.html", "onboarding.html", "register.html"):
-        template_path = TEMPLATES_DIR / template_name
-        if not template_path.exists():
-            app.logger.warning("Expected template is missing: %s", template_path)
-
-
-def safe_render_template(template_name, **context):
-    template_path = TEMPLATES_DIR / template_name
-    if not template_path.exists():
-        app.logger.error("Template file missing: %s", template_path)
-        return f"Template '{template_name}' is missing on the server.", 500
-
-    try:
-        return render_template(template_name, **context)
-    except TemplateNotFound:  # pragma: no cover - depends on deployment assets
-        app.logger.exception("Template resolution failed for %s", template_name)
-        return f"Template '{template_name}' could not be loaded.", 500
-
-
 configure_logging(app)
+set_app_logger(app.logger)
 sys.excepthook = handle_uncaught_exception
-prepare_runtime_paths()
+prepare_runtime_paths(app.logger)
 
 if not os.environ.get("GROQ_API_KEY"):
     app.logger.warning("GROQ_API_KEY is not set. AI routes will stay available but return safe fallback messages.")
@@ -198,42 +133,7 @@ if not os.environ.get("FLASK_SECRET_KEY") and not os.environ.get("SECRET_KEY"):
     )
 
 CHAT_SESSIONS = {}
-MAX_CHAT_MESSAGES = 20
-AI_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-DATABASE_PATH = str(DATABASE_FILE)
-SYSTEM_PROMPT = (
-    "You are the helpful AI assistant inside Personal AI OS, a productivity dashboard. "
-    "Give concise, practical, friendly answers that help the user plan, learn, and stay consistent. "
-    "When the user asks for study help, tailor your suggestions using their current tasks, habits, and recent study history."
-)
-ENERGY_QUESTION_COUNT = 6
-WORKOUT_CALORIE_RATES = {
-    "Walking": 4,
-    "Running": 10,
-    "Gym": 6,
-    "Jogging": 7,
-    "Cycling": 8,
-    "Swimming": 9,
-    "Yoga": 4,
-    "Stretching": 3,
-    "Sports": 8,
-    "Dancing": 6,
-    "House Work": 4,
-    "Climbing Stairs": 8,
-}
-TASK_PRIORITIES = {"High", "Medium", "Low"}
-AI_ACTION_PROMPTS = {
-    "energy": "Give 3 quick ways to boost energy right now.",
-    "study": "Create a simple study plan for today.",
-    "evening": "Plan a productive evening with study and relaxation.",
-    "focus": "Suggest a focused work session plan.",
-}
-AI_ACTION_FALLBACKS = {
-    "energy": "Try a quick reset: drink water, stand up, walk for 5 minutes, and start one small task right away.",
-    "study": "Study in two 25-minute sessions with a 5-minute break between them, and start with the hardest topic first.",
-    "evening": "Do one focused study block, take a short break, then finish with a light review and a calm wind-down.",
-    "focus": "Work for 25 minutes on one priority, silence distractions, then take a 5-minute break before the next block.",
-}
+PENDING_AI_TASKS = {}
 
 
 def get_ai_client():
@@ -249,24 +149,6 @@ def get_ai_client():
         api_key=api_key,
         base_url="https://api.groq.com/openai/v1",
     )
-
-
-def get_db_connection():
-    ensure_directory(DATABASE_FILE.parent, "database directory")
-    connection = sqlite3.connect(DATABASE_PATH, timeout=30)
-    connection.execute("PRAGMA foreign_keys = ON")
-    return connection
-
-
-def get_current_time():
-    try:
-        return datetime.now(ZoneInfo(APP_TIMEZONE))
-    except Exception:
-        return datetime.now()
-
-
-def get_today_string():
-    return get_current_time().date().isoformat()
 
 
 @dataclass
@@ -430,6 +312,113 @@ def create_user_account(username, email, password):
     return user_id
 
 
+def update_user_password(user_id, password):
+    password_hash = generate_password_hash(password)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET password_hash = ? WHERE id = ?",
+        (password_hash, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def hash_reset_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def delete_reset_tokens_for_user(user_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def create_password_reset_token(user_id):
+    token = secrets.token_urlsafe(32)
+    token_hash = hash_reset_token(token)
+    expires_at = get_current_time().timestamp() + 3600
+    created_at = get_current_time().isoformat(timespec="seconds")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+    cur.execute(
+        """
+        INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (user_id, token_hash, expires_at, created_at),
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+
+def get_password_reset_user_id(token):
+    token_hash = hash_reset_token(token)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT user_id, expires_at
+        FROM password_reset_tokens
+        WHERE token_hash = ?
+        """,
+        (token_hash,),
+    )
+    row = cur.fetchone()
+
+    if not row:
+        conn.close()
+        return None, "invalid"
+
+    user_id, expires_at = row
+    if float(expires_at) < get_current_time().timestamp():
+        cur.execute("DELETE FROM password_reset_tokens WHERE token_hash = ?", (token_hash,))
+        conn.commit()
+        conn.close()
+        return None, "expired"
+
+    conn.close()
+    return user_id, None
+
+
+def delete_password_reset_token(token):
+    token_hash = hash_reset_token(token)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM password_reset_tokens WHERE token_hash = ?", (token_hash,))
+    conn.commit()
+    conn.close()
+
+
+def send_password_reset_email(user, token):
+    sender = os.environ.get("EMAIL_ADDRESS")
+    password = os.environ.get("EMAIL_PASSWORD")
+    if not sender or not password:
+        raise RuntimeError("Email is not configured. Set EMAIL_ADDRESS and EMAIL_PASSWORD.")
+
+    reset_link = url_for("reset_password", token=token, _external=True)
+    message = EmailMessage()
+    message["Subject"] = "Reset your Personal AI OS password"
+    message["From"] = sender
+    message["To"] = user["email"]
+    message.set_content(
+        "Hello,\n\n"
+        "Use the link below to reset your Personal AI OS password. This link expires in 1 hour.\n\n"
+        f"{reset_link}\n\n"
+        "If you did not request this reset, you can ignore this email."
+    )
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
+        smtp.starttls()
+        smtp.login(sender, password)
+        smtp.send_message(message)
+
+
 def get_current_user_id():
     if current_user.is_authenticated:
         try:
@@ -452,425 +441,6 @@ def get_current_username():
     if not record:
         return None
     return record["username"]
-
-
-def format_user_name(username):
-    return username.capitalize()
-
-
-def login_required(view_func):
-    @wraps(view_func)
-    def wrapped_view(*args, **kwargs):
-        if not get_current_username():
-            return redirect(url_for("login"))
-        return view_func(*args, **kwargs)
-
-    return wrapped_view
-
-
-def api_login_required(view_func):
-    @wraps(view_func)
-    def wrapped_view(*args, **kwargs):
-        if not get_current_username():
-            return jsonify({
-                "error": "Please log in to continue.",
-                "redirect_url": url_for("login"),
-            }), 401
-        return view_func(*args, **kwargs)
-
-    return wrapped_view
-
-
-def normalize_task_list(task_list):
-    cleaned_tasks = []
-    seen = set()
-
-    for task in task_list:
-        if not isinstance(task, str):
-            continue
-        cleaned = task.strip()
-        if not cleaned:
-            continue
-        normalized = cleaned.casefold()
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        cleaned_tasks.append(cleaned)
-
-    return cleaned_tasks
-
-
-def normalize_priority(value):
-    cleaned = (value or "").strip().capitalize()
-    if cleaned in TASK_PRIORITIES:
-        return cleaned
-    return "Medium"
-
-
-def parse_exercise_value(value):
-    if isinstance(value, bool):
-        return value
-
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"yes", "true", "1"}:
-            return True
-        if normalized in {"no", "false", "0"}:
-            return False
-
-    return None
-
-
-def generate_start_day_plan(tasks, sleep_hours, mood, exercised):
-    plan_parts = []
-
-    if sleep_hours < 6:
-        plan_parts.append("Take it easy today. Avoid heavy work.")
-
-    if mood == "Stressed":
-        plan_parts.append("Take breaks and avoid overload.")
-    elif mood == "Low Energy":
-        plan_parts.append("Start with light work, protect your focus, and build momentum gradually.")
-    elif mood == "Focused":
-        plan_parts.append("Use your focus early on the most important task.")
-
-    if not exercised:
-        plan_parts.append("Try a short walk today.")
-
-    if tasks:
-        plan_parts.append(f"Begin with {tasks[0]} and move through the rest one step at a time.")
-
-    if not plan_parts:
-        plan_parts.append("You are set up for a balanced day. Start with your top priority and keep your momentum steady.")
-
-    return " ".join(plan_parts)
-
-
-def format_progress_value(value):
-    if int(value) == value:
-        return str(int(value))
-    return f"{value:.1f}".rstrip("0").rstrip(".")
-
-
-def parse_iso_date(value):
-    if not value:
-        return None
-
-    try:
-        return date.fromisoformat(str(value))
-    except ValueError:
-        return None
-
-
-def coerce_json_list(value):
-    if isinstance(value, list):
-        return value
-
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError:
-            return []
-        if isinstance(parsed, list):
-            return parsed
-
-    return []
-
-
-def normalize_date_history(values):
-    normalized = []
-    seen = set()
-
-    for raw_value in coerce_json_list(values):
-        parsed = parse_iso_date(raw_value)
-        if not parsed:
-            continue
-        iso_value = parsed.isoformat()
-        if iso_value in seen:
-            continue
-        seen.add(iso_value)
-        normalized.append(iso_value)
-
-    normalized.sort()
-    return normalized
-
-
-def compute_streak_from_history(values):
-    history = normalize_date_history(values)
-    if not history:
-        return 0
-
-    history_set = set(history)
-    current_day = parse_iso_date(get_today_string())
-    streak = 0
-
-    while current_day and current_day.isoformat() in history_set:
-        streak += 1
-        current_day -= timedelta(days=1)
-
-    return streak
-
-
-def get_bmi_category(bmi_value):
-    if bmi_value < 18.5:
-        return "Underweight"
-    if bmi_value <= 24.9:
-        return "Normal"
-    return "Overweight"
-
-
-def estimate_calorie_adjustment(weight_gap):
-    gap = abs(float(weight_gap or 0))
-    if gap < 2:
-        return 300
-    if gap < 6:
-        return 400
-    return 500
-
-
-def build_health_guidance(health_snapshot):
-    if not health_snapshot:
-        return None
-
-    bmi_value = float(health_snapshot.get("bmi") or 0)
-    weight_kg = float(health_snapshot.get("weight_kg") or 0)
-    ideal_min = float(health_snapshot.get("ideal_weight_min") or 0)
-    ideal_max = float(health_snapshot.get("ideal_weight_max") or 0)
-    category = health_snapshot.get("category") or get_bmi_category(bmi_value)
-
-    if bmi_value < 18.5:
-        calorie_delta = estimate_calorie_adjustment(ideal_min - weight_kg)
-        guidance = {
-            "goal": "Gain weight",
-            "calorie_delta": calorie_delta,
-            "calorie_direction": "increase",
-            "calorie_guidance": f"Increase ~{calorie_delta} kcal/day to reach a healthier weight gradually.",
-            "actions": [
-                f"Increase calories by ~{calorie_delta}/day",
-                "Eat protein-rich food",
-                "Add strength training",
-            ],
-            "foods_to_add": ["Protein-rich meals", "Milk or yogurt", "Nuts and rice"],
-            "foods_to_reduce": [],
-            "short_tip": f"Tip: Increase ~{calorie_delta} kcal/day",
-            "plan_slide": {
-                "icon": "🧠",
-                "text": f"Health Tip: Increase ~{calorie_delta} kcal/day and add strength training",
-            },
-        }
-    elif bmi_value <= 24.9:
-        guidance = {
-            "goal": "Maintain",
-            "calorie_delta": 0,
-            "calorie_direction": "maintain",
-            "calorie_guidance": "Maintain your current calories and stay active.",
-            "actions": [
-                "Follow a balanced diet",
-                "Keep regular exercise",
-            ],
-            "foods_to_add": ["Fruits", "Vegetables", "Protein"],
-            "foods_to_reduce": [],
-            "short_tip": "Tip: Maintain your calories and regular exercise",
-            "plan_slide": {
-                "icon": "🧠",
-                "text": "Health Tip: Keep a balanced diet and regular exercise",
-            },
-        }
-    else:
-        calorie_delta = estimate_calorie_adjustment(weight_kg - ideal_max)
-        guidance = {
-            "goal": "Lose weight",
-            "calorie_delta": calorie_delta,
-            "calorie_direction": "reduce",
-            "calorie_guidance": f"Reduce ~{calorie_delta} kcal/day to reach ideal weight gradually.",
-            "actions": [
-                f"Reduce calories by ~{calorie_delta}/day",
-                "Avoid junk food",
-                "Add cardio like walking or jogging",
-            ],
-            "foods_to_add": ["Fruits", "Vegetables", "Protein"],
-            "foods_to_reduce": ["Sugar", "Fried foods"],
-            "short_tip": f"Tip: Reduce ~{calorie_delta} kcal/day",
-            "plan_slide": {
-                "icon": "🧠",
-                "text": f"Health Tip: Reduce ~{calorie_delta} kcal/day and walk 20 min",
-            },
-        }
-
-    return {
-        **health_snapshot,
-        **guidance,
-    }
-
-
-def calculate_health_insight(height_cm, weight_kg):
-    height_m = height_cm / 100
-    bmi_value = weight_kg / (height_m ** 2)
-    ideal_min = 18.5 * (height_m ** 2)
-    ideal_max = 24.9 * (height_m ** 2)
-
-    return build_health_guidance({
-        "height_cm": round(height_cm, 1),
-        "weight_kg": round(weight_kg, 1),
-        "bmi": round(bmi_value, 1),
-        "category": get_bmi_category(bmi_value),
-        "ideal_weight_min": round(ideal_min, 1),
-        "ideal_weight_max": round(ideal_max, 1),
-    })
-
-
-def ensure_column(cursor, table_name, column_name, definition):
-    existing_columns = {
-        row[1]
-        for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
-    }
-    if column_name not in existing_columns:
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
-
-
-def ensure_daily_entries_schema(cursor):
-    # Rebuild the daily table when needed so each user gets one entry per date.
-    table_exists = cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_entries'"
-    ).fetchone()
-
-    desired_sql = """
-        CREATE TABLE IF NOT EXISTS daily_entries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user TEXT NOT NULL,
-            entry_date TEXT NOT NULL,
-            tasks_json TEXT NOT NULL,
-            sleep_hours REAL NOT NULL,
-            study_hours_total REAL NOT NULL DEFAULT 0,
-            mood TEXT NOT NULL,
-            energy_level INTEGER NOT NULL DEFAULT 0,
-            exercised INTEGER NOT NULL,
-            plan TEXT NOT NULL,
-            completed_tasks_json TEXT NOT NULL DEFAULT '[]',
-            energy_percent INTEGER NOT NULL DEFAULT 0,
-            calories_override INTEGER,
-            energy_answers_json TEXT NOT NULL DEFAULT '[]',
-            is_cleared INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT NOT NULL,
-            UNIQUE(user, entry_date)
-        )
-    """
-
-    if not table_exists:
-        cursor.execute(desired_sql)
-        return
-
-    existing_columns = {
-        row[1]
-        for row in cursor.execute("PRAGMA table_info(daily_entries)").fetchall()
-    }
-    index_rows = cursor.execute("PRAGMA index_list(daily_entries)").fetchall()
-    has_user_date_unique_index = False
-    for index_row in index_rows:
-        if not index_row[2]:
-            continue
-        index_name = index_row[1]
-        indexed_columns = [
-            info_row[2]
-            for info_row in cursor.execute(f"PRAGMA index_info({index_name})").fetchall()
-        ]
-        if indexed_columns == ["user", "entry_date"]:
-            has_user_date_unique_index = True
-            break
-
-    if "user" in existing_columns and has_user_date_unique_index:
-        ensure_column(cursor, "daily_entries", "study_hours_total", "REAL NOT NULL DEFAULT 0")
-        ensure_column(cursor, "daily_entries", "completed_tasks_json", "TEXT NOT NULL DEFAULT '[]'")
-        ensure_column(cursor, "daily_entries", "energy_percent", "INTEGER NOT NULL DEFAULT 0")
-        ensure_column(cursor, "daily_entries", "calories_override", "INTEGER")
-        ensure_column(cursor, "daily_entries", "energy_answers_json", "TEXT NOT NULL DEFAULT '[]'")
-        ensure_column(cursor, "daily_entries", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
-        return
-
-    cursor.execute("ALTER TABLE daily_entries RENAME TO daily_entries_old")
-    cursor.execute(desired_sql)
-
-    old_columns = {
-        row[1]
-        for row in cursor.execute("PRAGMA table_info(daily_entries_old)").fetchall()
-    }
-
-    user_expression = "user" if "user" in old_columns else "''"
-    completed_expression = (
-        "COALESCE(completed_tasks_json, '[]')"
-        if "completed_tasks_json" in old_columns else
-        "'[]'"
-    )
-    energy_percent_expression = (
-        "COALESCE(energy_percent, 0)"
-        if "energy_percent" in old_columns else
-        "0"
-    )
-    energy_answers_expression = (
-        "COALESCE(energy_answers_json, '[]')"
-        if "energy_answers_json" in old_columns else
-        "'[]'"
-    )
-    calories_override_expression = (
-        "calories_override"
-        if "calories_override" in old_columns else
-        "NULL"
-    )
-    is_cleared_expression = (
-        "COALESCE(is_cleared, 0)"
-        if "is_cleared" in old_columns else
-        "0"
-    )
-    energy_level_expression = (
-        "COALESCE(energy_level, 0)"
-        if "energy_level" in old_columns else
-        "0"
-    )
-    study_hours_expression = (
-        "COALESCE(study_hours_total, 0)"
-        if "study_hours_total" in old_columns else
-        "0"
-    )
-
-    cursor.execute(
-        f"""
-        INSERT INTO daily_entries (
-            user,
-            entry_date,
-            tasks_json,
-            sleep_hours,
-            study_hours_total,
-            mood,
-            energy_level,
-            exercised,
-            plan,
-            completed_tasks_json,
-            energy_percent,
-            calories_override,
-            energy_answers_json,
-            is_cleared,
-            created_at
-        )
-        SELECT
-            {user_expression},
-            entry_date,
-            tasks_json,
-            sleep_hours,
-            {study_hours_expression},
-            mood,
-            {energy_level_expression},
-            exercised,
-            plan,
-            {completed_expression},
-            {energy_percent_expression},
-            {calories_override_expression},
-            {energy_answers_expression},
-            {is_cleared_expression},
-            created_at
-        FROM daily_entries_old
-        """
-    )
-    cursor.execute("DROP TABLE daily_entries_old")
 
 
 def get_today_entry(user=None):
@@ -1165,6 +735,95 @@ def sync_today_task_records(task_names, user=None, priority_lookup=None, complet
     conn.commit()
     conn.close()
 
+
+def add_user_task_from_ai(task_name, priority):
+    current_user = get_current_username()
+    current_user_id = get_current_user_id()
+    today = get_today_string()
+    cleaned_task_name = str(task_name or "").strip()
+    normalized_priority = normalize_priority(priority)
+
+    if not current_user or not current_user_id:
+        raise RuntimeError("Please log in before adding tasks.")
+
+    if not cleaned_task_name:
+        raise ValueError("Task name is required.")
+
+    conn = get_db_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT tasks_json
+            FROM daily_entries
+            WHERE user = ? AND entry_date = ? AND is_cleared = 0
+            """,
+            (current_user, today),
+        )
+        daily_entry_row = cur.fetchone()
+        if not daily_entry_row:
+            raise RuntimeError("Please complete today's setup first before adding tasks.")
+
+        raw_tasks_json = daily_entry_row[0] or "[]"
+        try:
+            daily_tasks = json.loads(raw_tasks_json)
+        except json.JSONDecodeError:
+            daily_tasks = []
+
+        daily_tasks = normalize_task_list(daily_tasks)
+        existing_task_names = {item.casefold() for item in daily_tasks}
+        if cleaned_task_name.casefold() in existing_task_names:
+            return f"{cleaned_task_name} is already in your tasks."
+
+        daily_tasks.append(cleaned_task_name)
+
+        cur.execute(
+            """
+            UPDATE daily_entries
+            SET tasks_json = ?
+            WHERE user = ? AND entry_date = ? AND is_cleared = 0
+            """,
+            (json.dumps(daily_tasks), current_user, today),
+        )
+
+        cur.execute(
+            """
+            INSERT INTO tasks (
+                name,
+                user,
+                user_id,
+                entry_date,
+                priority,
+                task_type,
+                completed,
+                streak_count,
+                completion_history_json,
+                is_cleared,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, 'daily', 0, 0, '[]', 0, ?)
+            """,
+            (
+                cleaned_task_name,
+                current_user,
+                current_user_id,
+                today,
+                normalized_priority,
+                get_current_time().isoformat(timespec="seconds"),
+            ),
+        )
+
+        conn.commit()
+    except sqlite3.Error as exc:
+        conn.rollback()
+        app.logger.exception("Failed to add a task from AI tool use.")
+        raise RuntimeError("I couldn't add that task right now. Please try again.") from exc
+    finally:
+        conn.close()
+
+    return f"I have added {cleaned_task_name} to your tasks!"
+
+
 def save_energy_log(score, answers, user_id=None):
     current_user_id = user_id or get_current_user_id()
     if not current_user_id:
@@ -1283,67 +942,42 @@ def save_health_data(height_cm, weight_kg, user_id=None):
     return insight
 
 
-def generate_daily_plan(data):
-    sleep_hours = float(data.get("sleep_hours") or 0)
-    energy = int(data.get("energy_percent") or 0)
-    pending_tasks = data.get("pending_tasks") or []
-    completed_tasks = data.get("completed_tasks") or []
-    study_hours = float(data.get("study_hours") or 0)
-    exercise_minutes = int(data.get("exercise_minutes") or 0)
-    calories_burned = int(data.get("calories_burned") or 0)
-    current_hour = int(data.get("current_hour") or get_current_time().hour)
-    health_data = data.get("health") or {}
-
-    suggestions = []
-
-    if sleep_hours < 5:
-        suggestions.append("Keep today light: reading, planning, and low-intensity work first.")
-    elif energy < 40:
-        suggestions.append("Start with lighter tasks like review, reading, or planning.")
-    elif energy <= 70:
-        suggestions.append("Use 1 or 2 focused blocks for study, assignments, or admin tasks.")
-    else:
-        suggestions.append("Use your high energy for deep work on the hardest task first.")
-
-    if pending_tasks:
-        suggestions.append(f"Complete {pending_tasks[0]} next, then move to the remaining pending tasks.")
-    elif completed_tasks:
-        suggestions.append("You cleared your main tasks. Do a quick review and set up tomorrow's top priority.")
-    else:
-        suggestions.append("Add 1 or 2 clear tasks so the plan can become more specific.")
-
-    health_tip = health_data.get("plan_slide")
-    if health_tip:
-        suggestions.append(health_tip)
-
-    if study_hours < 1:
-        suggestions.append("Study for 1 hour in two short focused sessions.")
-    elif study_hours < 3 and energy >= 40:
-        suggestions.append("Add one more study block to keep momentum going.")
-
-    if exercise_minutes < 10 and calories_burned < 120:
-        suggestions.append("Exercise 10 to 15 minutes or take a brisk walk.")
-
-    if current_hour >= 18:
-        suggestions.append("Keep the evening calm: finish one meaningful task, then wind down.")
-    elif current_hour < 12:
-        suggestions.append("Protect the morning for your highest-focus work.")
-
-    return suggestions[:4]
-
-
 def build_dashboard_state(today_entry):
     sleep_goal = 8
-    study_goal = 4
     exercise_goal = 30
     calories_goal = 400
     exercise_minutes = get_today_exercise_minutes()
-    study_hours = get_today_study_hours()
+    current_user = get_current_username()
+    career_study = get_career_study_snapshot(current_user)
+    study_hours = float(career_study["today_hours"] or 0)
+    study_goal = max(float(career_study["target_hours"] or 4), 0.5)
+    subjects_studied_today = career_study["subjects_studied_today"]
+    subject_catalog = get_career_subject_catalog(current_user)
+    studied_lookup = {subject.casefold() for subject in subjects_studied_today}
+    subjects_not_studied = [
+        subject for subject in subject_catalog
+        if subject.casefold() not in studied_lookup
+    ]
+    pipeline_entries = get_career_pipeline_entries(current_user)
+    pipeline_focus = next(
+        (
+            entry for entry in pipeline_entries
+            if str(entry.get("next_action") or "").strip() and entry.get("status") != "Completed"
+        ),
+        None,
+    ) or next(
+        (
+            entry for entry in pipeline_entries
+            if str(entry.get("next_action") or "").strip()
+        ),
+        {},
+    )
+    remaining_study_hours = max(study_goal - study_hours, 0)
     daily_tasks = get_today_task_records()
     if today_entry["tasks"] and not daily_tasks:
         sync_today_task_records(
             today_entry["tasks"],
-            get_current_username(),
+            current_user,
             completed_lookup=today_entry["completed_tasks"],
         )
         daily_tasks = get_today_task_records()
@@ -1372,6 +1006,9 @@ def build_dashboard_state(today_entry):
         "calories_burned": calories_burned,
         "current_hour": get_current_time().hour,
         "health": health_data,
+        "pipeline_focus": pipeline_focus,
+        "remaining_study_hours": remaining_study_hours,
+        "subjects_not_studied": subjects_not_studied,
     })
 
     return {
@@ -1394,6 +1031,7 @@ def build_dashboard_state(today_entry):
                 "percent": round(study_ratio * 100),
                 "theme": "study",
                 "current_hours": study_hours,
+                "target_hours": study_goal,
             },
             {
                 "key": "tasks",
@@ -1434,6 +1072,12 @@ def build_dashboard_state(today_entry):
         "study_form": {
             "default_subject": "Focused session",
         },
+        "study_tracker": {
+            **career_study,
+            "subject_catalog": subject_catalog,
+            "subjects_not_studied": subjects_not_studied,
+        },
+        "career_pipeline": pipeline_entries,
         "tasks": daily_tasks,
         "daily_tasks": daily_tasks,
         "long_term_tasks": long_term_tasks,
@@ -1448,6 +1092,12 @@ def build_dashboard_state(today_entry):
             "energy_percent": energy_percent,
             "exercise_minutes": exercise_minutes,
             "study_hours": format_progress_value(study_hours),
+            "study_target_hours": format_progress_value(study_goal),
+            "study_hours_remaining": format_progress_value(remaining_study_hours),
+            "subjects_studied_today": subjects_studied_today,
+            "subjects_studied_today_count": len(subjects_studied_today),
+            "subjects_not_studied": subjects_not_studied,
+            "pipeline_focus": pipeline_focus,
             "calories_burned": calories_burned,
             "completed_tasks": completed_tasks,
             "total_tasks": total_tasks,
@@ -1456,134 +1106,309 @@ def build_dashboard_state(today_entry):
         },
     }
 
-def init_db():
+
+def get_chat_history_key(user=None):
+    current_user = user or get_current_username() or "guest"
+    chat_session_id = get_chat_session_id()
+    return f"{current_user}:{chat_session_id}"
+
+
+def get_pending_ai_task(user=None):
+    return PENDING_AI_TASKS.get(get_chat_history_key(user))
+
+
+def set_pending_ai_task(task_name, priority, user=None):
+    cleaned_task_name = str(task_name or "").strip()
+    if not cleaned_task_name:
+        return None
+
+    pending_task = {
+        "task_name": cleaned_task_name,
+        "priority": normalize_priority(priority),
+    }
+    PENDING_AI_TASKS[get_chat_history_key(user)] = pending_task
+    return pending_task
+
+
+def clear_pending_ai_task(user=None):
+    return PENDING_AI_TASKS.pop(get_chat_history_key(user), None)
+
+
+def is_add_task_confirmation_message(message):
+    normalized = str(message or "").strip().lower()
+    return normalized in {
+        "add this task",
+        "yes, add task",
+        "yes add task",
+        "add it",
+        "yes",
+    }
+
+
+def is_cancel_task_confirmation_message(message):
+    normalized = str(message or "").strip().lower()
+    return normalized in {
+        "cancel",
+        "cancel task",
+        "don't add",
+        "do not add",
+        "no",
+        "no thanks",
+    }
+
+
+def has_explicit_task_creation_intent(message):
+    normalized = " ".join(str(message or "").strip().lower().split())
+    if not normalized:
+        return False
+
+    intent_phrases = (
+        "add this to task",
+        "add this task",
+        "create a task",
+        "create task",
+        "add reminder",
+        "set a reminder",
+        "remind me to",
+    )
+    return any(phrase in normalized for phrase in intent_phrases)
+
+
+def get_career_pipeline_entries(user):
+    if not user:
+        return []
+
     conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, company_name, role, status, next_action
+        FROM career_pipeline
+        WHERE user = ?
+        ORDER BY id DESC
+        """,
+        (user,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    return [
+        {
+            "id": row[0],
+            "company_name": row[1],
+            "role": row[2],
+            "status": row[3],
+            "next_action": row[4],
+        }
+        for row in rows
+    ]
+
+
+def get_career_study_snapshot(user):
+    if not user:
+        return {
+            "today_hours": 0,
+            "weekly_total": 0,
+            "target_hours": 4,
+            "subjects_studied_today": [],
+        }
+
+    today = parse_iso_date(get_today_string()) or date.today()
+    week_start = today - timedelta(days=today.weekday())
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT COALESCE(study_hours, 0), COALESCE(target_hours, 4), COALESCE(subjects_json, '[]')
+        FROM career_study_tracker
+        WHERE user = ? AND entry_date = ?
+        """,
+        (user, today.isoformat()),
+    )
+    today_row = cur.fetchone()
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(study_hours), 0)
+        FROM career_study_tracker
+        WHERE user = ? AND entry_date BETWEEN ? AND ?
+        """,
+        (user, week_start.isoformat(), today.isoformat()),
+    )
+    weekly_row = cur.fetchone()
+    conn.close()
+
+    subjects = []
+    if today_row:
+        try:
+            subjects = normalize_study_subjects(json.loads(today_row[2] or "[]"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            subjects = []
+
+    return {
+        "today_hours": float(today_row[0] or 0) if today_row else 0,
+        "weekly_total": float(weekly_row[0] or 0) if weekly_row else 0,
+        "target_hours": float(today_row[1] or 4) if today_row else 4,
+        "subjects_studied_today": subjects,
+    }
+
+
+def get_career_subject_catalog(user):
+    if not user:
+        return []
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT subject_name
+        FROM career_subjects
+        WHERE user = ?
+        ORDER BY lower(subject_name)
+        """,
+        (user,),
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return [row[0] for row in rows if row and row[0]]
+
+
+def get_career_skill_focus(user):
+    catalog = get_career_subject_catalog(user)
+    studied_lookup = set(get_career_study_snapshot(user).get("subjects_studied_today") or [])
+    return [
+        {"subject_name": subject_name, "studied_today": subject_name in studied_lookup}
+        for subject_name in catalog
+    ]
+
+
+def build_career_state(user):
+    study_snapshot = get_career_study_snapshot(user)
+    return {
+        "pipeline_entries": get_career_pipeline_entries(user),
+        "skill_focus": get_career_skill_focus(user),
+        "study": {
+            **study_snapshot,
+            "subject_catalog": get_career_subject_catalog(user),
+        },
+    }
+
+
+def add_career_pipeline_entry(user, company_name, role, status, next_action):
+    if status not in CAREER_STATUSES:
+        raise ValueError("Please choose a valid application status.")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO career_pipeline (
+            user,
+            company_name,
+            role,
+            status,
+            next_action,
+            created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            user,
+            normalize_career_text(company_name, "Company name"),
+            normalize_career_text(role, "Role"),
+            status,
+            normalize_career_text(next_action, "Next action"),
+            get_current_time().isoformat(timespec="seconds"),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_career_skill_focus(user, subjects_studied):
+    snapshot = get_career_study_snapshot(user)
+    save_career_study_hours(
+        user,
+        snapshot.get("today_hours", 0),
+        snapshot.get("target_hours", 4),
+        subjects_studied,
+        get_career_subject_catalog(user),
+    )
+
+
+def save_career_study_hours(user, study_hours, target_hours=None, subjects_studied=None, subject_catalog=None):
     try:
-        cur = conn.cursor()
+        hours = float(study_hours)
+    except (TypeError, ValueError):
+        raise ValueError("Study hours must be a valid number.")
 
+    if hours < 0 or hours > 24:
+        raise ValueError("Study hours must be between 0 and 24.")
+
+    try:
+        target = float(target_hours if target_hours is not None else 4)
+    except (TypeError, ValueError):
+        raise ValueError("Target hours must be a valid number.")
+
+    if target < 0.5 or target > 24:
+        raise ValueError("Target hours must be between 0.5 and 24.")
+
+    catalog = normalize_study_subjects(subject_catalog)
+    if not catalog:
+        catalog = get_career_subject_catalog(user)
+
+    subjects = [
+        subject
+        for subject in normalize_study_subjects(subjects_studied)
+        if subject in set(catalog)
+    ]
+
+    today = get_today_string()
+    timestamp = get_current_time().isoformat(timespec="seconds")
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+    existing_subjects = {
+        row[0]
+        for row in cur.execute(
+            "SELECT subject_name FROM career_subjects WHERE user = ?",
+            (user,),
+        ).fetchall()
+    }
+
+    for subject_name in catalog:
         cur.execute(
             """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT NOT NULL UNIQUE,
-                email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS tasks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS study (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                subject TEXT,
-                hours INTEGER
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS habits (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                habit TEXT,
-                streak INTEGER DEFAULT 0
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS workouts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user TEXT NOT NULL,
-                entry_date TEXT NOT NULL,
-                activity_type TEXT NOT NULL,
-                duration INTEGER NOT NULL,
-                calories INTEGER NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS energy_logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                score INTEGER NOT NULL,
-                entry_date TEXT NOT NULL,
-                answers_json TEXT NOT NULL DEFAULT '[]',
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(user_id, entry_date)
-            )
-            """
-        )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS health_data (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                entry_date TEXT NOT NULL,
-                height_cm REAL NOT NULL,
-                weight_kg REAL NOT NULL,
-                bmi REAL NOT NULL,
-                category TEXT NOT NULL,
-                ideal_weight_min REAL NOT NULL,
-                ideal_weight_max REAL NOT NULL,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                UNIQUE(user_id, entry_date)
-            )
-            """
+            INSERT INTO career_subjects (user, subject_name, created_at, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user, subject_name) DO UPDATE SET
+                updated_at = excluded.updated_at
+            """,
+            (user, subject_name, timestamp, timestamp),
         )
 
-        ensure_column(cur, "tasks", "user", "TEXT NOT NULL DEFAULT ''")
-        ensure_column(cur, "tasks", "user_id", "INTEGER")
-        ensure_column(cur, "tasks", "entry_date", "TEXT NOT NULL DEFAULT ''")
-        ensure_column(cur, "tasks", "priority", "TEXT NOT NULL DEFAULT 'Medium'")
-        ensure_column(cur, "tasks", "task_type", "TEXT NOT NULL DEFAULT 'daily'")
-        ensure_column(cur, "tasks", "completed", "INTEGER NOT NULL DEFAULT 0")
-        ensure_column(cur, "tasks", "streak_count", "INTEGER NOT NULL DEFAULT 0")
-        ensure_column(cur, "tasks", "last_completed_date", "TEXT")
-        ensure_column(cur, "tasks", "completion_history_json", "TEXT NOT NULL DEFAULT '[]'")
-        ensure_column(cur, "tasks", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
-        ensure_column(cur, "tasks", "created_at", "TEXT")
-        ensure_column(cur, "study", "created_at", "TEXT")
-        ensure_column(cur, "study", "user", "TEXT NOT NULL DEFAULT ''")
-        ensure_column(cur, "habits", "user", "TEXT NOT NULL DEFAULT ''")
-        ensure_column(cur, "workouts", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
-        ensure_daily_entries_schema(cur)
-
-        cur.execute(
-            """
-            UPDATE tasks
-            SET user_id = (
-                SELECT users.id
-                FROM users
-                WHERE lower(users.username) = lower(tasks.user)
-                LIMIT 1
+    for subject_name in existing_subjects:
+        if subject_name not in set(catalog):
+            cur.execute(
+                "DELETE FROM career_subjects WHERE user = ? AND subject_name = ?",
+                (user, subject_name),
             )
-            WHERE (user_id IS NULL OR user_id = 0) AND user <> ''
-            """
-        )
 
-        conn.commit()
-        app.logger.info("SQLite database is ready at %s", DATABASE_PATH)
-    except Exception:
-        app.logger.exception("Database initialization failed for %s", DATABASE_PATH)
-        raise
-    finally:
-        conn.close()
+    cur.execute(
+        """
+        INSERT INTO career_study_tracker (user, entry_date, study_hours, target_hours, subjects_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user, entry_date) DO UPDATE SET
+            study_hours = excluded.study_hours,
+            target_hours = excluded.target_hours,
+            subjects_json = excluded.subjects_json,
+            updated_at = excluded.updated_at
+        """,
+        (user, today, hours, target, json.dumps(subjects), timestamp),
+    )
+    conn.commit()
+    conn.close()
 
-
-init_db()
+init_db(app.logger)
 
 
 @app.errorhandler(Exception)
@@ -1614,10 +1439,7 @@ def get_chat_session_id():
 
 
 def get_chat_history():
-    user = get_current_username() or "guest"
-    chat_session_id = get_chat_session_id()
-    history_key = f"{user}:{chat_session_id}"
-    return CHAT_SESSIONS.setdefault(history_key, [])
+    return CHAT_SESSIONS.setdefault(get_chat_history_key(), [])
 
 
 
@@ -1632,6 +1454,9 @@ def get_dashboard_context():
     workouts = get_today_workouts(current_user)
     long_term_tasks = get_long_term_task_records(current_user)
     health_data = get_latest_health_data()
+    career_study = get_career_study_snapshot(current_user)
+    pipeline_entries = get_career_pipeline_entries(current_user)
+    subject_catalog = get_career_subject_catalog(current_user)
 
     if not current_user:
         return (
@@ -1679,13 +1504,13 @@ def get_dashboard_context():
         if workouts else
         "No activity logs today."
     )
-    study_goal_text = "Target 4 hours today; progress not started."
+    study_goal_text = (
+        f"Target {format_progress_value(career_study['target_hours'])} hours today; "
+        f"current progress {format_progress_value(career_study['today_hours'])} hour(s)."
+    )
     schedule_text = "No schedule captured yet."
 
     if today_entry:
-        study_goal_text = (
-            f"Target 4 hours today; current progress {format_progress_value(today_entry['study_hours_total'])} hour(s)."
-        )
         schedule_text = today_entry["plan"] or "No schedule captured yet."
 
     tasks_today_text = ", ".join(tasks_today) if tasks_today else "No tasks planned for today yet."
@@ -1702,6 +1527,25 @@ def get_dashboard_context():
         if health_data else
         "No health insight saved yet."
     )
+    pipeline_text = (
+        ", ".join(
+            f"{entry['company_name']} - {entry['role']} ({entry['status']}, next: {entry['next_action']})"
+            for entry in pipeline_entries[:3]
+        )
+        if pipeline_entries else
+        "No active applications yet."
+    )
+    studied_today_text = (
+        ", ".join(career_study["subjects_studied_today"])
+        if career_study["subjects_studied_today"] else
+        "No subjects marked today."
+    )
+    studied_lookup = {item.casefold() for item in career_study["subjects_studied_today"]}
+    remaining_subjects = [
+        subject for subject in subject_catalog
+        if subject.casefold() not in studied_lookup
+    ]
+    remaining_subjects_text = ", ".join(remaining_subjects) if remaining_subjects else "All listed subjects were covered today."
 
     return (
         "User Dashboard Data:\n"
@@ -1713,6 +1557,9 @@ def get_dashboard_context():
         f"- Habits: {habit_text}\n"
         f"- Activity Logs: {workout_text}\n"
         f"- Schedule: {schedule_text}\n"
+        f"- Career Pipeline: {pipeline_text}\n"
+        f"- Study Subjects Today: {studied_today_text}\n"
+        f"- Remaining Subjects: {remaining_subjects_text}\n"
         f"- Backlog Tasks: {backlog_text}\n"
         f"- Long-Term Goals: {long_term_text}\n"
         f"- Health Insight: {health_text}"
@@ -1778,29 +1625,8 @@ def update_study_hours_total(action, value=None, user=None):
 
 
 
-def extract_response_text(payload):
-    output_text = payload.get("output_text")
-    if isinstance(output_text, str) and output_text.strip():
-        return output_text.strip()
-
-    text_parts = []
-    for item in payload.get("output", []):
-        if item.get("type") != "message":
-            continue
-        for content in item.get("content", []):
-            if content.get("type") == "output_text":
-                text = content.get("text", "").strip()
-                if text:
-                    text_parts.append(text)
-
-    if text_parts:
-        return "\n".join(text_parts)
-
-    return "I could not generate a reply just now. Please try again."
-
-
-
 def get_openai_reply(history, user_message, dashboard_context):
+    explicit_task_intent = has_explicit_task_creation_intent(user_message)
     messages = [
         {
             "role": "system",
@@ -1808,7 +1634,10 @@ def get_openai_reply(history, user_message, dashboard_context):
                 "You are a professional personal AI assistant. You help users plan their day, "
                 "prioritize tasks, improve productivity, and give actionable advice based on their real data. "
                 "Always give clear, structured, and practical suggestions. Keep responses concise, ideally within 8 to 10 lines. "
-                "Use bullet points when helpful. If the dashboard data is sparse or missing, ask smart follow-up questions instead of saying you have no access."
+                "Use bullet points when helpful. If the dashboard data is sparse or missing, ask smart follow-up questions instead of saying you have no access. "
+                "Never add tasks or ask task-confirmation questions unless the user explicitly asks to add a task, create a task, or add a reminder. "
+                "When an idea could be useful as a task but the user did not ask to save it, respond normally and, if helpful, end with: "
+                "'You can add this as a task if needed.'"
             ),
         },
         {"role": "system", "content": dashboard_context},
@@ -1821,29 +1650,89 @@ def get_openai_reply(history, user_message, dashboard_context):
             messages.append({"role": role, "content": content})
 
     messages.append({"role": "user", "content": user_message})
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "add_user_task",
+                "description": "Add a daily task for the current user only when the user explicitly asks to create a task or reminder.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "task_name": {
+                            "type": "string",
+                            "description": "The task to add to today's task list.",
+                        },
+                        "priority": {
+                            "type": "string",
+                            "enum": ["High", "Medium", "Low"],
+                            "description": "Priority level for the task.",
+                        },
+                    },
+                    "required": ["task_name", "priority"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+
+    request_options = {
+        "model": AI_MODEL,
+        "messages": messages,
+    }
+    if explicit_task_intent:
+        request_options["tools"] = tools
+        request_options["tool_choice"] = "auto"
 
     try:
         client = get_ai_client()
-        response = client.chat.completions.create(
-            model=AI_MODEL,
-            messages=messages,
-        )
+        response = client.chat.completions.create(**request_options)
     except Exception as exc:  # pragma: no cover - depends on live API/runtime
         app.logger.exception("AI chat request failed.")
         error_text = str(exc).lower()
         if "insufficient_quota" in error_text or "quota" in error_text:
-            return "AI is temporarily unavailable. Please check API usage."
+            return "AI is temporarily unavailable. Please check API usage.", False, None
         if "not configured yet" in error_text or "groq_api_key" in error_text:
             raise RuntimeError("AI is not configured yet. Set GROQ_API_KEY on the server.") from exc
         raise RuntimeError("AI is temporarily unavailable. Please try again.") from exc
 
+    assistant_message = response.choices[0].message if response.choices else None
+    tool_calls = getattr(assistant_message, "tool_calls", None) or []
+    if explicit_task_intent and tool_calls:
+        for tool_call in tool_calls:
+            function_name = getattr(getattr(tool_call, "function", None), "name", "")
+            if function_name != "add_user_task":
+                continue
+
+            raw_arguments = getattr(tool_call.function, "arguments", "") or "{}"
+            try:
+                tool_arguments = json.loads(raw_arguments)
+            except json.JSONDecodeError:
+                app.logger.warning("AI tool arguments could not be parsed: %s", raw_arguments)
+                return "I had a task suggestion, but it could not be parsed correctly.", False, None
+
+            if not isinstance(tool_arguments, dict):
+                return "I had a task suggestion, but it could not be parsed correctly.", False, None
+
+            task_name = str(tool_arguments.get("task_name") or "").strip()
+            priority = str(tool_arguments.get("priority") or "").strip()
+            try:
+                bot_reply = add_user_task_from_ai(task_name, priority)
+            except (RuntimeError, ValueError) as exc:
+                return str(exc), False, None
+            clear_pending_ai_task()
+            return bot_reply, True, None
+
     response_text = (
-        response.choices[0].message.content.strip()
-        if response.choices and response.choices[0].message.content
+        assistant_message.content.strip()
+        if assistant_message and assistant_message.content
         else ""
     )
 
-    return response_text or "I could not generate a reply just now. Please try again."
+    if explicit_task_intent and not response_text:
+        return "Tell me the exact task you'd like me to add.", False, None
+
+    return response_text or "I could not generate a reply just now. Please try again.", False, None
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -1860,10 +1749,113 @@ def login():
 
         return safe_render_template("login.html", error="Invalid credentials")
 
-    if get_current_username():
+    if current_user.is_authenticated:
         return redirect(url_for("home"))
 
     return safe_render_template("login.html", error=None)
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        user = get_user_by_email(email)
+
+        if not user:
+            return safe_render_template(
+                "forgot_password.html",
+                error="Email not found.",
+                success=None,
+                email=email,
+            )
+
+        token = create_password_reset_token(user["id"])
+        try:
+            send_password_reset_email(user, token)
+        except RuntimeError as exc:
+            delete_reset_tokens_for_user(user["id"])
+            return safe_render_template(
+                "forgot_password.html",
+                error=str(exc),
+                success=None,
+                email=email,
+            )
+        except Exception:
+            app.logger.exception("Password reset email failed for user id %s.", user["id"])
+            delete_reset_tokens_for_user(user["id"])
+            return safe_render_template(
+                "forgot_password.html",
+                error="Could not send reset email. Please try again later.",
+                success=None,
+                email=email,
+            )
+
+        return safe_render_template(
+            "forgot_password.html",
+            error=None,
+            success="Password reset email sent. Please check your inbox.",
+            email="",
+        )
+
+    return safe_render_template("forgot_password.html", error=None, success=None, email="")
+
+
+@app.route("/reset-password/<token>", methods=["GET", "POST"])
+def reset_password(token):
+    user_id, token_error = get_password_reset_user_id(token)
+    if token_error:
+        message = "Expired token." if token_error == "expired" else "Invalid token."
+        return safe_render_template(
+            "reset_password.html",
+            error=message,
+            success=None,
+            token_valid=False,
+            token=token,
+        )
+
+    if request.method == "POST":
+        password = request.form.get("password") or ""
+        confirm_password = request.form.get("confirm_password") or ""
+
+        if not password:
+            return safe_render_template(
+                "reset_password.html",
+                error="New password is required.",
+                success=None,
+                token_valid=True,
+                token=token,
+            )
+
+        if len(password) < 6:
+            return safe_render_template(
+                "reset_password.html",
+                error="Password must be at least 6 characters long.",
+                success=None,
+                token_valid=True,
+                token=token,
+            )
+
+        if password != confirm_password:
+            return safe_render_template(
+                "reset_password.html",
+                error="Password mismatch.",
+                success=None,
+                token_valid=True,
+                token=token,
+            )
+
+        update_user_password(user_id, password)
+        delete_password_reset_token(token)
+        flash("Password updated successfully. Please log in.")
+        return redirect(url_for("login"))
+
+    return safe_render_template(
+        "reset_password.html",
+        error=None,
+        success=None,
+        token_valid=True,
+        token=token,
+    )
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -1888,20 +1880,26 @@ def register():
             sign_in_user(user_record, remember=True)
         return redirect(url_for("home"))
 
-    if get_current_username():
+    if current_user.is_authenticated:
         return redirect(url_for("home"))
 
     return safe_render_template("register.html", error=None, form_data={"username": "", "email": ""})
 
 
-@app.route("/logout", methods=["GET", "POST"])
+@app.route("/logout", methods=["GET"])
+@login_required
 def logout():
-    current_user = get_current_username() or "guest"
-    chat_session_id = session.get("chat_session_id")
+    current_username = get_current_username() or "guest"
+    app.logger.info("Logout route hit for user '%s'.", current_username)
+
+    chat_session_id = session.pop("chat_session_id", None)
     if chat_session_id:
-        CHAT_SESSIONS.pop(f"{current_user}:{chat_session_id}", None)
+        CHAT_SESSIONS.pop(f"{current_username}:{chat_session_id}", None)
+        PENDING_AI_TASKS.pop(f"{current_username}:{chat_session_id}", None)
+
+    session.pop("user_id", None)
     logout_user()
-    session.clear()
+    flash("Logged out successfully")
     return redirect(url_for("login"))
 
 
@@ -1924,6 +1922,7 @@ def dashboard():
     today_entry = get_today_entry()
     if not today_entry:
         return redirect(url_for("home"))
+    career_study = get_career_study_snapshot(get_current_username())
     dashboard_state = build_dashboard_state(today_entry)
 
     return safe_render_template(
@@ -1931,8 +1930,100 @@ def dashboard():
         chat_history=get_chat_history(),
         today_entry=today_entry,
         dashboard_state=dashboard_state,
+        subjects_studied_today=career_study["subjects_studied_today"],
         current_user_display=format_user_name(get_current_username()),
     )
+
+
+@app.route("/career")
+@login_required
+def career():
+    username = get_current_username()
+    career_state = build_career_state(username)
+    if request.args.get("partial") == "1":
+        return safe_render_template(
+            "components/career_content.html",
+            username=username,
+            career_state=career_state,
+        )
+
+    return safe_render_template(
+        "career.html",
+        username=username,
+        career_state=career_state,
+    )
+
+
+@app.route("/financial")
+@login_required
+def financial():
+    if request.args.get("partial") == "1":
+        return safe_render_template("components/financial_content.html")
+
+    return safe_render_template("financial.html")
+
+
+@app.route("/career/add_application", methods=["POST"])
+@api_login_required
+def add_career_application():
+    current_user = get_current_username()
+    data = request.get_json(silent=True) or {}
+
+    try:
+        add_career_pipeline_entry(
+            current_user,
+            data.get("company_name"),
+            data.get("role"),
+            data.get("status"),
+            data.get("next_action"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({
+        "message": "Application added.",
+        "career_state": build_career_state(current_user),
+    })
+
+
+@app.route("/career/update_skills", methods=["POST"])
+@api_login_required
+def update_career_skills():
+    current_user = get_current_username()
+    data = request.get_json(silent=True) or {}
+
+    try:
+        update_career_skill_focus(current_user, data.get("subjects_studied") or [])
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({
+        "message": "Skill progress updated.",
+        "career_state": build_career_state(current_user),
+    })
+
+
+@app.route("/career/update_study", methods=["POST"])
+@api_login_required
+def update_career_study():
+    current_user = get_current_username()
+    data = request.get_json(silent=True) or {}
+
+    try:
+        save_career_study_hours(
+            current_user,
+            data.get("study_hours"),
+            data.get("target_hours"),
+            data.get("subjects_studied"),
+            data.get("subject_catalog"),
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    return jsonify({
+        "message": "Study hours saved.",
+        "career_state": build_career_state(current_user),
+    })
 
 
 @app.route("/add_task", methods=["POST"])
@@ -2072,12 +2163,82 @@ def get_tasks():
 def delete_task(task_id):
     current_user = get_current_username()
     conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE tasks SET is_cleared = 1 WHERE id = ? AND user = ?", (task_id, current_user))
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, name, task_type, entry_date
+            FROM tasks
+            WHERE id = ? AND user = ? AND is_cleared = 0
+            """,
+            (task_id, current_user),
+        )
+        row = cur.fetchone()
+        if not row:
+            conn.close()
+            return jsonify({"error": "Task not found."}), 404
 
-    return jsonify({"status": "deleted"})
+        _, task_name, task_type, entry_date = row
+
+        cur.execute("UPDATE tasks SET is_cleared = 1 WHERE id = ? AND user = ?", (task_id, current_user))
+
+        if task_type == "daily":
+            cur.execute(
+                """
+                SELECT tasks_json, completed_tasks_json
+                FROM daily_entries
+                WHERE user = ? AND entry_date = ? AND is_cleared = 0
+                """,
+                (current_user, entry_date),
+            )
+            daily_entry_row = cur.fetchone()
+            if daily_entry_row:
+                try:
+                    daily_tasks = json.loads(daily_entry_row[0] or "[]")
+                except json.JSONDecodeError:
+                    daily_tasks = []
+
+                try:
+                    completed_tasks = json.loads(daily_entry_row[1] or "[]")
+                except json.JSONDecodeError:
+                    completed_tasks = []
+
+                normalized_name = str(task_name).casefold()
+                updated_tasks = [
+                    item for item in normalize_task_list(daily_tasks)
+                    if str(item).casefold() != normalized_name
+                ]
+                updated_completed_tasks = [
+                    item for item in normalize_task_list(completed_tasks)
+                    if str(item).casefold() != normalized_name
+                ]
+
+                cur.execute(
+                    """
+                    UPDATE daily_entries
+                    SET tasks_json = ?, completed_tasks_json = ?
+                    WHERE user = ? AND entry_date = ? AND is_cleared = 0
+                    """,
+                    (
+                        json.dumps(updated_tasks),
+                        json.dumps(updated_completed_tasks),
+                        current_user,
+                        entry_date,
+                    ),
+                )
+
+        conn.commit()
+    finally:
+        conn.close()
+
+    today_entry = get_today_entry(current_user)
+    dashboard_state = build_dashboard_state(today_entry) if today_entry else None
+
+    return jsonify({
+        "status": "deleted",
+        "message": "Task deleted.",
+        "dashboard_state": dashboard_state,
+    })
 
 @app.route("/add_habit", methods=["POST"])
 @api_login_required
@@ -2665,20 +2826,112 @@ def chat():
 
     history = get_chat_history()
     dashboard_context = get_dashboard_context()
+    pending_task = get_pending_ai_task()
+
+    if pending_task and is_add_task_confirmation_message(user_message):
+        try:
+            bot_reply = add_user_task_from_ai(
+                pending_task["task_name"],
+                pending_task["priority"],
+            )
+        except (RuntimeError, ValueError) as exc:
+            bot_reply = str(exc)
+        clear_pending_ai_task()
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": bot_reply})
+        trim_chat_history(history)
+        today_entry = get_today_entry()
+        dashboard_state = build_dashboard_state(today_entry) if today_entry else None
+        return jsonify({
+            "response": bot_reply,
+            "reply": bot_reply,
+            "messages": history,
+            "dashboard_state": dashboard_state,
+            "tool_used": bool(dashboard_state),
+            "pending_task": None,
+        })
+
+    if pending_task and is_cancel_task_confirmation_message(user_message):
+        clear_pending_ai_task()
+        bot_reply = "Okay, I won't add that task."
+        history.append({"role": "user", "content": user_message})
+        history.append({"role": "assistant", "content": bot_reply})
+        trim_chat_history(history)
+        return jsonify({
+            "response": bot_reply,
+            "reply": bot_reply,
+            "messages": history,
+            "dashboard_state": None,
+            "tool_used": False,
+            "pending_task": None,
+        })
 
     try:
-        bot_reply = get_openai_reply(history, user_message, dashboard_context)
+        bot_reply, tool_used, pending_task = get_openai_reply(history, user_message, dashboard_context)
     except RuntimeError as exc:
         return jsonify({"error": str(exc)}), 500
 
     history.append({"role": "user", "content": user_message})
     history.append({"role": "assistant", "content": bot_reply})
     trim_chat_history(history)
+    today_entry = get_today_entry()
+    dashboard_state = build_dashboard_state(today_entry) if tool_used and today_entry else None
 
     return jsonify({
         "response": bot_reply,
         "reply": bot_reply,
-        "messages": history
+        "messages": history,
+        "dashboard_state": dashboard_state,
+        "tool_used": tool_used,
+        "pending_task": pending_task,
+    })
+
+
+@app.route("/chat/confirm_task", methods=["POST"])
+@api_login_required
+def confirm_chat_task():
+    pending_task = get_pending_ai_task()
+    if not pending_task:
+        return jsonify({"error": "No pending task suggestion found."}), 404
+
+    try:
+        bot_reply = add_user_task_from_ai(
+            pending_task["task_name"],
+            pending_task["priority"],
+        )
+    except (RuntimeError, ValueError) as exc:
+        clear_pending_ai_task()
+        return jsonify({"error": str(exc)}), 400
+
+    clear_pending_ai_task()
+    history = get_chat_history()
+    history.append({"role": "assistant", "content": bot_reply})
+    trim_chat_history(history)
+    today_entry = get_today_entry()
+    dashboard_state = build_dashboard_state(today_entry) if today_entry else None
+    return jsonify({
+        "message": bot_reply,
+        "reply": bot_reply,
+        "dashboard_state": dashboard_state,
+        "pending_task": None,
+    })
+
+
+@app.route("/chat/cancel_task", methods=["POST"])
+@api_login_required
+def cancel_chat_task():
+    pending_task = clear_pending_ai_task()
+    if not pending_task:
+        return jsonify({"error": "No pending task suggestion found."}), 404
+
+    bot_reply = "Okay, I won't add that task."
+    history = get_chat_history()
+    history.append({"role": "assistant", "content": bot_reply})
+    trim_chat_history(history)
+    return jsonify({
+        "message": bot_reply,
+        "reply": bot_reply,
+        "pending_task": None,
     })
 
 
@@ -2732,4 +2985,5 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.logger.info("Starting local Flask development server on http://127.0.0.1:%s", port)
     print(f"Running locally on http://127.0.0.1:{port}")
+
     app.run(host="0.0.0.0", port=port, debug=True)

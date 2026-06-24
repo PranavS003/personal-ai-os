@@ -1,0 +1,76 @@
+{% set current = request.endpoint %}
+{% set current_page = request.args.get('page', 'dashboard') if current == 'dashboard' else '' %}
+
+<div class="bottom-nav-glass" aria-label="Bottom navigation">
+    <a
+        id="dashboardTab"
+        class="nav-circle{% if current == 'dashboard' and current_page != 'activity' %} active{% endif %}"
+        href="{{ url_for('dashboard') }}"
+        onclick="if (window.goDashboard) { event.preventDefault(); window.goDashboard(); }"
+        onkeydown="if((event.key==='Enter'||event.key===' ') && window.goDashboard){event.preventDefault();window.goDashboard();}"
+        role="button"
+        tabindex="0"
+        title="Dashboard"
+        aria-label="Open dashboard page"
+    >
+        <span class="icon" aria-hidden="true">&#127968;</span>
+    </a>
+
+    <a
+        id="activityTab"
+        class="nav-circle{% if current == 'dashboard' and current_page == 'activity' %} active{% endif %}"
+        href="{{ url_for('dashboard', page='activity') }}"
+        onclick="if (window.goActivity) { event.preventDefault(); window.goActivity(); }"
+        onkeydown="if((event.key==='Enter'||event.key===' ') && window.goActivity){event.preventDefault();window.goActivity();}"
+        role="button"
+        tabindex="0"
+        title="Activity"
+        aria-label="Open activity page"
+    >
+        <span class="icon" aria-hidden="true">&#128202;</span>
+    </a>
+
+    <a
+        id="careerTab"
+        class="nav-circle{% if current == 'career' %} active{% endif %}"
+        href="{{ url_for('career') }}"
+        onclick="if (window.goCareer) { event.preventDefault(); window.goCareer(); }"
+        onkeydown="if((event.key==='Enter'||event.key===' ') && window.goCareer){event.preventDefault();window.goCareer();}"
+        role="button"
+        tabindex="0"
+        title="Career &amp; Growth"
+        aria-label="Open career page"
+    >
+        <span class="icon" aria-hidden="true">&#128188;</span>
+    </a>
+
+    <a
+        id="financialTab"
+        class="nav-circle{% if current == 'financial' %} active{% endif %}"
+        href="{{ url_for('financial') }}"
+        onclick="if (window.goFinancial) { event.preventDefault(); window.goFinancial(); }"
+        onkeydown="if((event.key==='Enter'||event.key===' ') && window.goFinancial){event.preventDefault();window.goFinancial();}"
+        role="button"
+        tabindex="0"
+        title="Financial Wellness"
+        aria-label="Open financial wellness page"
+    >
+        <span class="icon" aria-hidden="true">&#8377;</span>
+    </a>
+</div>
+
+<a
+    href="{{ url_for('dashboard', open_ai=1) }}"
+    class="ai-widget ai-center-btn"
+    onclick="if (window.openAI) { event.preventDefault(); window.openAI(); }"
+    onkeydown="if((event.key==='Enter'||event.key===' ') && window.openAI){event.preventDefault();window.openAI();}"
+    role="button"
+    tabindex="0"
+    aria-label="Open AI assistant"
+>
+    <div class="ai-avatar ai-launcher-button" aria-hidden="true">
+        <svg class="ai-launcher-icon ai-spark-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path class="spark-core" d="M12 2.75L14.35 9.65L21.25 12L14.35 14.35L12 21.25L9.65 14.35L2.75 12L9.65 9.65L12 2.75Z"></path>
+        </svg>
+    </div>
+</a>

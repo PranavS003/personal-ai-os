@@ -49,11 +49,24 @@ const dashboardHeroText = document.getElementById("dashboardHeroText");
 const supportButton = document.getElementById("supportButton");
 const supportPanel = document.getElementById("supportPanel");
 const actionPlanView = document.getElementById("actionPlanView");
+const mainContent = document.getElementById("main-content");
 const dashboardPage = document.getElementById("dashboardPage");
 const activityPage = document.getElementById("activityPage");
+const careerPage = document.getElementById("careerPage");
+const financialPage = document.getElementById("financialPage");
 const dashboardTab = document.getElementById("dashboardTab");
 const activityTab = document.getElementById("activityTab");
+const careerTab = document.getElementById("careerTab");
+const financialTab = document.getElementById("financialTab");
 const aiWidget = document.querySelector(".ai-widget.ai-center-btn");
+const botImageUrl = window.botImageUrl || "";
+const pageParams = new URLSearchParams(window.location.search);
+const initialPage = window.location.pathname === "/career"
+    ? "career"
+    : window.location.pathname === "/financial"
+        ? "financial"
+        : (pageParams.get("page") === "activity" ? "activity" : "dashboard");
+const shouldOpenAIOnLoad = pageParams.get("open_ai") === "1";
 
 const energyQuestions = [
     "How many hours did you sleep?",
@@ -116,10 +129,42 @@ function setDashboardFeedback(message, isError = false) {
 function setActiveNav(page) {
     dashboardTab?.classList.toggle("active", page === "dashboard");
     activityTab?.classList.toggle("active", page === "activity");
+    careerTab?.classList.toggle("active", page === "career");
+    financialTab?.classList.toggle("active", page === "financial");
 }
 
-function showPage(page = "dashboard") {
+function syncPageQuery(page = "dashboard", replace = false) {
+    if (!window.history?.replaceState) {
+        return;
+    }
+
+    const url = new URL(window.location.href);
+    if (page === "career") {
+        url.pathname = "/career";
+        url.search = "";
+    } else if (page === "financial") {
+        url.pathname = "/financial";
+        url.search = "";
+    } else {
+        url.pathname = "/dashboard";
+        if (page === "activity") {
+            url.searchParams.set("page", "activity");
+        } else {
+            url.searchParams.delete("page");
+        }
+    }
+    url.searchParams.delete("open_ai");
+    const state = { page };
+    const historyMethod = replace ? "replaceState" : "pushState";
+    window.history[historyMethod](state, "", url);
+}
+
+function showPage(page = "dashboard", options = {}) {
+    const { updateHistory = true, replaceHistory = false } = options;
     const isDashboard = page === "dashboard";
+    const isActivity = page === "activity";
+    const isCareer = page === "career";
+    const isFinancial = page === "financial";
 
     if (dashboardPage) {
         dashboardPage.style.display = isDashboard ? "grid" : "none";
@@ -127,11 +172,24 @@ function showPage(page = "dashboard") {
     }
 
     if (activityPage) {
-        activityPage.style.display = isDashboard ? "none" : "grid";
-        activityPage.classList.toggle("active-page", !isDashboard);
+        activityPage.style.display = isActivity ? "grid" : "none";
+        activityPage.classList.toggle("active-page", isActivity);
     }
 
-    setActiveNav(isDashboard ? "dashboard" : "activity");
+    if (careerPage) {
+        careerPage.style.display = isCareer ? "grid" : "none";
+        careerPage.classList.toggle("active-page", isCareer);
+    }
+
+    if (financialPage) {
+        financialPage.style.display = isFinancial ? "grid" : "none";
+        financialPage.classList.toggle("active-page", isFinancial);
+    }
+
+    setActiveNav(page);
+    if (updateHistory) {
+        syncPageQuery(page, replaceHistory);
+    }
 
     if (!isDashboard && chatShell?.classList.contains("chat-open")) {
         setChatOpen(false);
@@ -154,6 +212,102 @@ function goDashboard() {
 
 function goActivity() {
     showPage("activity");
+}
+
+async function loadCareerPage(options = {}) {
+    const { updateHistory = true, replaceHistory = false, forceReload = false } = options;
+    if (!careerPage) {
+        window.location.href = "/career";
+        return;
+    }
+
+    if (careerPage.dataset.loaded === "true" && !forceReload) {
+        careerPage.classList.add("page-transition");
+        showPage("career", { updateHistory, replaceHistory });
+        window.setTimeout(() => careerPage.classList.remove("page-transition"), 280);
+        return;
+    }
+
+    mainContent?.classList.add("is-loading");
+
+    try {
+        const response = await fetch("/career?partial=1", {
+            headers: {
+                "X-Requested-With": "fetch",
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error("Could not load the Career page.");
+        }
+
+        const html = await response.text();
+        careerPage.innerHTML = html;
+        careerPage.dataset.loaded = "true";
+        careerPage.classList.add("page-transition");
+        if (typeof window.initCareerPage === "function") {
+            window.initCareerPage(careerPage);
+        }
+        showPage("career", { updateHistory, replaceHistory });
+        window.setTimeout(() => careerPage.classList.remove("page-transition"), 280);
+    } catch (error) {
+        setDashboardFeedback("Could not load Career right now. Opening the full page instead.", true);
+        window.location.href = "/career";
+    } finally {
+        mainContent?.classList.remove("is-loading");
+    }
+}
+
+function goCareer() {
+    loadCareerPage();
+}
+
+async function loadFinancialPage(options = {}) {
+    const { updateHistory = true, replaceHistory = false, forceReload = false } = options;
+    if (!financialPage) {
+        window.location.href = "/financial";
+        return;
+    }
+
+    if (financialPage.dataset.loaded === "true" && !forceReload) {
+        financialPage.classList.add("page-transition");
+        showPage("financial", { updateHistory, replaceHistory });
+        window.setTimeout(() => financialPage.classList.remove("page-transition"), 280);
+        return;
+    }
+
+    mainContent?.classList.add("is-loading");
+
+    try {
+        const response = await fetch("/financial?partial=1", {
+            headers: {
+                "X-Requested-With": "fetch",
+            },
+        });
+
+        if (!response.ok) {
+            throw new Error("Could not load the Financial Wellness page.");
+        }
+
+        const html = await response.text();
+        financialPage.innerHTML = html;
+        financialPage.dataset.loaded = "true";
+        financialPage.classList.add("page-transition");
+        if (typeof window.initFinancialPage === "function") {
+            window.initFinancialPage(financialPage);
+        }
+        showPage("financial", { updateHistory, replaceHistory });
+        window.setTimeout(() => financialPage.classList.remove("page-transition"), 280);
+    } catch (error) {
+        setDashboardFeedback("Could not load Financial Wellness right now. Opening the full page instead.", true);
+        window.location.href = "/financial";
+    } finally {
+        mainContent?.classList.remove("is-loading");
+    }
+}
+
+function goFinancial() {
+    loadFinancialPage();
 }
 
 function showInitialPrompts() {
@@ -582,6 +736,10 @@ function formatMetricValue(metricKey, value) {
     return Number.isInteger(roundedValue) ? String(roundedValue) : roundedValue.toFixed(1);
 }
 
+function getStudySubjectsToday(summary = {}) {
+    return Array.isArray(summary.subjects_studied_today) ? summary.subjects_studied_today : [];
+}
+
 function getMetricCurrentValue(metricKey, summary = {}) {
     const config = getMetricConfig(metricKey, summary);
     if (!config) {
@@ -592,6 +750,11 @@ function getMetricCurrentValue(metricKey, summary = {}) {
 }
 
 function getMetricTargetValue(metricKey) {
+    if (metricKey === "study") {
+        const targetValue = Number(dashboardState?.summary?.study_target_hours);
+        return targetValue > 0 ? targetValue : 4;
+    }
+
     const config = getMetricConfig(metricKey, dashboardState?.summary || {});
     const fallbackTarget = DEFAULT_METRIC_TARGETS[metricKey] || 1;
     const storedTarget = Number(metricTargets[metricKey]);
@@ -612,13 +775,6 @@ function getMetricControlDefinitions(metricKey, summary = {}) {
         ];
     }
 
-    if (metricKey === "study") {
-        return [
-            { label: "Current", type: "current", value: currentValue, step: config.valueStep, min: 0, max: 12 },
-            { label: "Target", type: "target", value: targetValue, step: config.targetStep, min: 1, max: 10 },
-        ];
-    }
-
     if (metricKey === "calories") {
         return [
             { label: "Target", type: "target", value: targetValue, step: config.targetStep, min: 100, max: 1000 },
@@ -635,6 +791,24 @@ function createMetricExpandContent(metricKey, summary = {}) {
                 <div class="metric-popup-body">
                     <div class="metric-control">
                         <button type="button" class="metric-action-button" onclick="openEnergyFromCard(event)">Refine Energy</button>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    if (metricKey === "study") {
+        const subjects = getStudySubjectsToday(summary);
+        return `
+            <div class="metric-popup">
+                <div class="metric-popup-body">
+                    <div class="metric-row">
+                        <label>Today's Study</label>
+                        <div class="study-popup-list">
+                            ${subjects.length
+                                ? subjects.map((subject) => `<span class="study-popup-chip">${escapeHtml(subject)}</span>`).join("")
+                                : '<p class="study-popup-empty">No study logged today</p>'}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -675,6 +849,9 @@ function createInteractiveMetricCard(metricKey, summary = {}, delay = 0) {
     const targetValue = getMetricTargetValue(metricKey);
     const progressPercent = clampPercent((currentValue / targetValue) * 100);
     const isActive = activeMetricCardKey === metricKey;
+    const studyPreview = metricKey === "study"
+        ? `<div class="metric-preview">${escapeHtml(String(summary.subjects_studied_today_count || 0))} subjects today</div>`
+        : "";
 
     return `
         <article
@@ -700,6 +877,7 @@ function createInteractiveMetricCard(metricKey, summary = {}, delay = 0) {
                     <span data-metric-target="${metricKey}">${escapeHtml(formatMetricValue(metricKey, targetValue))}</span>
                     ${escapeHtml(config.unit)}
                 </div>
+                ${studyPreview}
             </div>
             <div class="metric-expand ${isActive ? "" : "hidden"}" aria-hidden="${isActive ? "false" : "true"}" onclick="event.stopPropagation()">
                 ${createMetricExpandContent(metricKey, summary)}
@@ -1029,8 +1207,11 @@ function createDailyTaskCard(task) {
             <span class="task-card-main">
                 <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
             </span>
-            <span class="task-card-meta">
+            <span class="task-card-actions">
+                <span class="task-card-meta">
                 <span class="task-priority-badge ${priorityClass}">${escapeHtml(priority)}</span>
+                </span>
+                <button type="button" class="task-delete-button" data-delete-task-id="${task.id}" aria-label="Delete task ${escapeHtml(task.name)}">&times;</button>
             </span>
         </label>
     `;
@@ -1047,9 +1228,12 @@ function createLongTermTaskCard(task) {
             <span class="task-card-main">
                 <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
             </span>
-            <span class="task-card-meta task-goal-meta">
-                <span class="task-priority-badge ${priorityClass}">${escapeHtml(priority)}</span>
-                <span class="task-streak-inline">&#128293; ${task.streak_count || 0} day${task.streak_count === 1 ? "" : "s"}</span>
+            <span class="task-card-actions">
+                <span class="task-card-meta task-goal-meta">
+                    <span class="task-priority-badge ${priorityClass}">${escapeHtml(priority)}</span>
+                    <span class="task-streak-inline">&#128293; ${task.streak_count || 0} day${task.streak_count === 1 ? "" : "s"}</span>
+                </span>
+                <button type="button" class="task-delete-button" data-delete-task-id="${task.id}" aria-label="Delete task ${escapeHtml(task.name)}">&times;</button>
             </span>
         </label>
     `;
@@ -1381,6 +1565,45 @@ async function handleTaskToggle(event) {
     }
 }
 
+async function handleTaskDelete(event) {
+    const deleteButton = event.target.closest("[data-delete-task-id]");
+    if (!deleteButton) {
+        return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const taskId = Number(deleteButton.dataset.deleteTaskId);
+    if (!taskId) {
+        return;
+    }
+
+    deleteButton.disabled = true;
+    setDashboardFeedback("Deleting task...");
+
+    try {
+        const response = await fetch(`/delete_task/${taskId}`, {
+            method: "DELETE",
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+            setDashboardFeedback(data.error || "Could not delete task.", true);
+            deleteButton.disabled = false;
+            return;
+        }
+
+        if (data.dashboard_state) {
+            renderDashboard(data.dashboard_state);
+        }
+        setDashboardFeedback(data.message || "Task deleted.");
+    } catch (error) {
+        deleteButton.disabled = false;
+        setDashboardFeedback("Could not reach the server. Please try again.", true);
+    }
+}
+
 async function handleEnergySubmit() {
     if (energyAnswers.some((answer) => answer < 1 || answer > 5)) {
         setEnergyFeedback(`Please answer all ${energyQuestions.length} questions before saving.`, true);
@@ -1468,9 +1691,9 @@ function appendChatMessage(role, text, extraClass = "") {
 
     if (role === "bot") {
         const avatar = document.createElement("div");
-        avatar.className = "chat-avatar chat-avatar-inline";
+        avatar.className = "chat-avatar chat-avatar-inline bot-visual";
         avatar.setAttribute("aria-hidden", "true");
-        avatar.innerHTML = '<img src="/static/images/ai-avatar.svg" alt="">';
+        avatar.innerHTML = `<img class="bot-visual__image" src="${botImageUrl}" alt="AI Bot">`;
         message.appendChild(avatar);
     }
 
@@ -1554,6 +1777,9 @@ async function submitChatMessage(message) {
         }
 
         appendChatMessage("bot", data.response || data.reply || "I could not generate a response right now.");
+        if (data.dashboard_state) {
+            renderDashboard(data.dashboard_state);
+        }
     } catch (error) {
         if (typingMessage) {
             typingMessage.remove();
@@ -1653,6 +1879,10 @@ window.personalAiDashboard = {
     closeAI,
     goDashboard,
     goActivity,
+    goCareer,
+    goFinancial,
+    loadCareerPage,
+    loadFinancialPage,
 };
 
 window.showPage = showPage;
@@ -1660,6 +1890,8 @@ window.openAI = openAI;
 window.closeAI = closeAI;
 window.goDashboard = goDashboard;
 window.goActivity = goActivity;
+window.goCareer = goCareer;
+window.goFinancial = goFinancial;
 window.sendMessage = sendMessage;
 window.quickAsk = quickAsk;
 
@@ -1687,10 +1919,12 @@ document.addEventListener("click", (event) => {
 
 if (dailyTaskList) {
     dailyTaskList.addEventListener("change", handleTaskToggle);
+    dailyTaskList.addEventListener("click", handleTaskDelete);
 }
 
 if (longTermTaskList) {
     longTermTaskList.addEventListener("change", handleTaskToggle);
+    longTermTaskList.addEventListener("click", handleTaskDelete);
 }
 
 if (refreshDashboardButton) {
@@ -1848,7 +2082,13 @@ document.querySelectorAll(".bottom-nav .nav-item").forEach((item) => {
     });
 });
 
-showPage("dashboard");
+if (initialPage === "career") {
+    loadCareerPage({ updateHistory: false, replaceHistory: true });
+} else if (initialPage === "financial") {
+    loadFinancialPage({ updateHistory: false, replaceHistory: true });
+} else {
+    showPage(initialPage, { updateHistory: false, replaceHistory: true });
+}
 
 if (dashboardState) {
     renderDashboard(dashboardState);
@@ -1857,3 +2097,28 @@ if (dashboardState) {
 syncTaskComposerState();
 showInitialPrompts();
 scrollChatToBottom();
+
+if (shouldOpenAIOnLoad) {
+    openAI();
+}
+
+window.addEventListener("popstate", () => {
+    const params = new URLSearchParams(window.location.search);
+    const nextPage = window.location.pathname === "/career"
+        ? "career"
+        : window.location.pathname === "/financial"
+            ? "financial"
+        : (params.get("page") === "activity" ? "activity" : "dashboard");
+
+    if (nextPage === "career") {
+        loadCareerPage({ updateHistory: false, replaceHistory: true });
+        return;
+    }
+
+    if (nextPage === "financial") {
+        loadFinancialPage({ updateHistory: false, replaceHistory: true });
+        return;
+    }
+
+    showPage(nextPage, { updateHistory: false, replaceHistory: true });
+});

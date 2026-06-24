@@ -1,0 +1,139 @@
+<div class="career-page" data-career-root data-career-state='{{ career_state|tojson|forceescape }}'>
+    <section class="panel workspace-topbar mobile-hero-panel">
+        <div>
+            <p class="panel-kicker">Career &amp; Growth</p>
+            <h1>{{ username }}, keep your next step visible</h1>
+            <p class="hero-text">Track applications, maintain core skill focus, log study time, and jump into quick AI prep from one simple workspace.</p>
+        </div>
+        <div class="career-toolbar">
+            <a href="{{ url_for('dashboard') }}" class="ghost-button logout-link" role="button" onclick="if (window.goDashboard) { event.preventDefault(); window.goDashboard(); }">Back to Dashboard</a>
+            <a href="{{ url_for('logout') }}" class="ghost-button logout-link" role="button">Logout</a>
+        </div>
+    </section>
+
+    <section class="career-grid">
+        <article class="panel mobile-card-section career-card">
+            <div class="career-section-head">
+                <div class="career-card-copy">
+                    <p class="panel-kicker">Placement Tracker</p>
+                    <h2>Active Pipeline</h2>
+                    <p class="hero-text">Keep the list clean and open the form only when you need it.</p>
+                </div>
+                <button id="togglePipelineForm" type="button" class="ghost-button">Add Application</button>
+            </div>
+
+            <div id="pipelineFormShell" class="pipeline-form-shell hidden">
+                <form id="pipelineForm" class="career-form">
+                    <div class="career-form-grid">
+                        <div class="career-field">
+                            <label for="companyName">Company Name</label>
+                            <input id="companyName" name="company_name" type="text" placeholder="e.g. Infosys" required>
+                        </div>
+                        <div class="career-field">
+                            <label for="roleName">Role</label>
+                            <input id="roleName" name="role" type="text" placeholder="e.g. Software Engineer" required>
+                        </div>
+                    </div>
+                    <div class="career-form-grid">
+                        <div class="career-field">
+                            <label for="applicationStatus">Status</label>
+                            <select id="applicationStatus" name="status" required>
+                                <option value="Applied">Applied</option>
+                                <option value="In Progress">In Progress</option>
+                                <option value="Completed">Completed</option>
+                            </select>
+                        </div>
+                        <div class="career-field">
+                            <label for="nextAction">Next Action</label>
+                            <input id="nextAction" name="next_action" type="text" placeholder="e.g. Prepare aptitude round" required>
+                        </div>
+                    </div>
+                    <button type="submit">Save Application</button>
+                </form>
+            </div>
+
+            <div id="pipelineList" class="career-list" aria-live="polite"></div>
+        </article>
+
+        <article class="panel mobile-card-section career-card">
+            <div class="career-card-copy">
+                <p class="panel-kicker">Today's Subjects</p>
+                <h2>Skill Focus</h2>
+                <p class="hero-text">Only the subjects from your Study Tracker appear here.</p>
+                <p class="career-helper-text">Mark what you studied today.</p>
+            </div>
+
+            <div id="skillList" class="skill-list" aria-live="polite"></div>
+
+            <button id="saveSkillsButton" type="button">Save Studied Today</button>
+        </article>
+
+        <article class="panel mobile-card-section career-card">
+            <div class="career-card-copy">
+                <p class="panel-kicker">Daily Study</p>
+                <h2>Study Tracker</h2>
+                <p class="hero-text">Log today's hours and keep a simple weekly total in view.</p>
+            </div>
+
+            <form id="studyForm" class="career-form career-study-form">
+                <div class="career-form-grid">
+                    <div class="career-field">
+                        <label for="studyHoursInput">Study Hours</label>
+                        <input id="studyHoursInput" name="study_hours" type="number" min="0" max="24" step="0.5" placeholder="0">
+                    </div>
+                    <div class="career-field">
+                        <label for="targetHoursInput">Target Hours</label>
+                        <input id="targetHoursInput" name="target_hours" type="number" min="0.5" max="24" step="0.5" placeholder="4">
+                    </div>
+                </div>
+                <div class="study-subject-composer">
+                    <div class="career-field">
+                        <label for="subjectInput">Add Subject</label>
+                        <input id="subjectInput" type="text" placeholder="e.g. DBMS">
+                    </div>
+                    <button id="addSubjectButton" type="button" class="ghost-button">Add Subject</button>
+                </div>
+                <div id="studySubjectChips" class="study-subject-chips" aria-live="polite"></div>
+                <button type="submit">Save Study Update</button>
+            </form>
+
+            <div class="study-summary">
+                <div class="study-summary-row">
+                    <span>Today</span>
+                    <span id="todayStudyValue" class="study-hours-value">0h</span>
+                </div>
+                <div class="study-summary-row">
+                    <span>This Week</span>
+                    <strong id="weeklyStudyValue">0h</strong>
+                </div>
+                <div class="study-summary-row">
+                    <span>Target</span>
+                    <strong id="targetStudyValue">4h</strong>
+                </div>
+                <div>
+                    <div class="career-row-title">Today's Subjects</div>
+                    <div id="studySubjectList" class="study-subject-list" aria-live="polite"></div>
+                </div>
+                <p class="study-note">Small daily updates are enough. You can overwrite today's value anytime.</p>
+            </div>
+        </article>
+
+        <article class="panel mobile-card-section career-card">
+            <div class="career-card-copy">
+                <p class="panel-kicker">Action Center</p>
+                <h2>Quick AI Prep</h2>
+                <p class="hero-text">Use one tap to start a practice prompt through your existing AI route.</p>
+            </div>
+
+            <div class="ai-prep-actions">
+                <button type="button" class="ai-prep-button" data-ai-prompt="Start a mock interview for a software engineering placement round. Ask one question at a time and wait for my answer.">Start Mock Interview</button>
+                <button type="button" class="ai-prep-button ghost-button" data-ai-prompt="Give me one coding interview question for placement preparation. Include the expected approach after I try it.">Give Coding Question</button>
+                <button type="button" class="ai-prep-button ghost-button" data-ai-prompt="Start GD practice for campus placements. Give one topic and help me structure my speaking points.">Start GD Practice</button>
+            </div>
+
+            <div id="aiPrepResponse" class="ai-response" aria-live="polite">Choose an action to get a quick prompt or fallback guidance.</div>
+        </article>
+    </section>
+
+    <p id="careerFeedback" class="career-feedback" aria-live="polite"></p>
+</div>
