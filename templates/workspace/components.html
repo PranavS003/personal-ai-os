@@ -1,0 +1,60 @@
+{% from 'components/auth_fields.html' import csrf %}
+
+{% macro task_metadata(task, today) %}
+    <div class="task-metadata">
+        <span class="priority priority-{{ task.priority | lower }}">{{ task.priority }} priority</span>
+        {% if task.due_date %}
+            {% set overdue = task.due_date < today and not task.completed %}
+            <span{% if overdue %} class="overdue"{% endif %}>
+                {{ 'Overdue' if overdue else 'Due' }}
+                <time datetime="{{ task.due_date.isoformat() }}">{% if task.due_date == today %}today{% else %}{{ task.due_date.strftime('%b') }} {{ task.due_date.day }}{% if task.due_date.year != today.year %}, {{ task.due_date.year }}{% endif %}{% endif %}</time>
+            </span>
+        {% elif task.entry_date and task.task_type == 'daily' %}
+            <span>Planned <time datetime="{{ task.entry_date.isoformat() }}">{% if task.entry_date == today %}today{% else %}{{ task.entry_date.strftime('%b') }} {{ task.entry_date.day }}{% if task.entry_date.year != today.year %}, {{ task.entry_date.year }}{% endif %}{% endif %}</time></span>
+        {% endif %}
+        {% if task.task_type == 'long_term' %}<span>Goal</span>{% endif %}
+    </div>
+{% endmacro %}
+
+{% macro task_status(task, return_to, emphasized=false) %}
+    <form method="post" action="{{ url_for('workspace_set_task_status', task_id=task.id) }}">
+        {{ csrf() }}
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <input type="hidden" name="completed" value="{{ '0' if task.completed else '1' }}">
+        <button class="button {{ 'button-primary' if emphasized else 'button-secondary' }}" type="submit" aria-label="{{ 'Reopen' if task.completed else 'Complete' }} task: {{ task.title }}">{{ 'Reopen' if task.completed else 'Complete' }}</button>
+    </form>
+{% endmacro %}
+
+{% macro task_row(task, today, return_to) %}
+    <li class="task-row{% if task.completed %} task-completed{% endif %}">
+        <div class="task-content">
+            <p class="task-title">{{ task.title }}</p>
+            {{ task_metadata(task, today) }}
+        </div>
+        <div class="task-actions">
+            <a class="button button-plain" href="{{ url_for('workspace_edit_task', task_id=task.id, return_to='today' if return_to == 'today' else none) }}" aria-label="Edit task: {{ task.title }}">Edit</a>
+            {{ task_status(task, return_to) }}
+        </div>
+    </li>
+{% endmacro %}
+
+{% macro task_fields(values, title_limit=200) %}
+    <div class="field">
+        <label for="task-title">Task name</label>
+        <input id="task-title" type="text" name="title" value="{{ values.title | default('') }}" maxlength="{{ title_limit }}" required>
+    </div>
+    <div class="task-form-fields">
+        <div class="field">
+            <label for="task-priority">Priority</label>
+            <select id="task-priority" name="priority">
+                {% for priority in ('High', 'Medium', 'Low') %}
+                    <option value="{{ priority }}"{% if (values.priority | default('Medium')) == priority %} selected{% endif %}>{{ priority }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="task-due-date">Deadline <span>(optional)</span></label>
+            <input id="task-due-date" type="date" name="due_date" value="{{ values.due_date | default('', true) }}">
+        </div>
+    </div>
+{% endmacro %}

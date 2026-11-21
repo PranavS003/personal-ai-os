@@ -22,6 +22,7 @@
                         <h1 id="greetingHeading">Good Morning, {{ current_user_display }}</h1>
                     </div>
                     <div class="intro-toolbar-actions">
+                        <a href="{{ url_for('dashboard') }}" class="ghost-button">Back to Today</a>
                         <label class="skip-preference">
                             <input type="checkbox" id="skipIntroPreference">
                             <span>Don&apos;t show again</span>
@@ -79,7 +80,7 @@
                         </div>
                     </div>
 
-                    <p id="setupFeedback" class="setup-feedback" aria-live="polite"></p>
+                    <p id="setupFeedback" class="setup-feedback" aria-live="polite">{{ day_notice or '' }}</p>
 
                     <div class="form-footer">
                         <button type="submit" id="startDayButton" class="start-day-button">Start My Day</button>

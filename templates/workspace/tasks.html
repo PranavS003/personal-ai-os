@@ -1,0 +1,72 @@
+{% extends 'workspace/base.html' %}
+{% from 'components/auth_fields.html' import csrf %}
+{% from 'workspace/components.html' import task_fields, task_row %}
+
+{% block title %}{{ 'Edit task' if editing_task else 'Tasks' }}{% endblock %}
+
+{% block content %}
+    {% if editing_task %}
+        {% set from_today = return_to == 'today' %}
+        <div class="page-heading">
+            <h1>Edit task</h1>
+            <a class="button button-secondary" href="{{ url_for('dashboard' if from_today else 'workspace_tasks') }}">{{ 'Back to Today' if from_today else 'Back to tasks' }}</a>
+        </div>
+        <section class="card edit-card" aria-label="Task details">
+            {% if form_error %}<p class="notice notice-error" role="alert">{{ form_error }}</p>{% endif %}
+            <form class="task-form" method="post" action="{{ url_for('workspace_edit_task', task_id=editing_task.id) }}">
+                {{ csrf() }}
+                <input type="hidden" name="return_to" value="{{ 'today' if from_today else 'tasks' }}">
+                {{ task_fields(form_values | default(editing_task, true), [200, (editing_task.title or '') | length] | max) }}
+                <button class="button button-primary" type="submit">Save changes</button>
+            </form>
+            <details class="delete-task">
+                <summary>Delete task</summary>
+                <p>Remove this task from your task list?</p>
+                <form method="post" action="{{ url_for('workspace_delete_task', task_id=editing_task.id) }}">
+                    {{ csrf() }}
+                    <input type="hidden" name="return_to" value="{{ 'today' if from_today else 'tasks' }}">
+                    <button class="button button-danger" type="submit">Confirm deletion</button>
+                </form>
+            </details>
+        </section>
+    {% else %}
+        <div class="page-heading">
+            <h1>Tasks</h1>
+        </div>
+        <div class="tasks-layout">
+            <section id="add-task" class="card" aria-labelledby="add-task-heading">
+                <h2 id="add-task-heading">Add a task</h2>
+                {% if form_error %}<p class="notice notice-error" role="alert">{{ form_error }}</p>{% endif %}
+                <form class="task-form" method="post" action="{{ url_for('workspace_create_task') }}">
+                    {{ csrf() }}
+                    {{ task_fields(form_values | default({}, true)) }}
+                    <button class="button button-primary" type="submit">Add task</button>
+                </form>
+            </section>
+
+            {% set open_tasks = tasks | rejectattr('completed') | list %}
+            {% set completed_tasks = tasks | selectattr('completed') | list %}
+            <div class="section-stack">
+                <section class="card" aria-labelledby="open-tasks-heading">
+                    <h2 id="open-tasks-heading">Open tasks</h2>
+                    {% if open_tasks %}
+                        <ul class="task-list">
+                            {% for task in open_tasks %}{{ task_row(task, today, 'tasks') }}{% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="empty-state">{{ 'All tasks are complete.' if completed_tasks else 'You have no tasks yet.' }}</p>
+                    {% endif %}
+                </section>
+
+                {% if completed_tasks %}
+                    <section class="card" aria-labelledby="completed-tasks-heading">
+                        <h2 id="completed-tasks-heading">Completed</h2>
+                        <ul class="task-list">
+                            {% for task in completed_tasks %}{{ task_row(task, today, 'tasks') }}{% endfor %}
+                        </ul>
+                    </section>
+                {% endif %}
+            </div>
+        </div>
+    {% endif %}
+{% endblock %}

@@ -168,6 +168,7 @@ def ensure_daily_entries_schema(cursor):
 def init_db(logger):
     conn = get_db_connection()
     try:
+        conn.execute("BEGIN IMMEDIATE")
         cur = conn.cursor()
 
         cur.execute(
@@ -326,6 +327,8 @@ def init_db(logger):
         ensure_column(cur, "tasks", "completion_history_json", "TEXT NOT NULL DEFAULT '[]'")
         ensure_column(cur, "tasks", "is_cleared", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(cur, "tasks", "created_at", "TEXT")
+        ensure_column(cur, "tasks", "due_date", "TEXT")
+        ensure_column(cur, "tasks", "completed_at", "TEXT")
         ensure_column(cur, "study", "created_at", "TEXT")
         ensure_column(cur, "study", "user", "TEXT NOT NULL DEFAULT ''")
         ensure_column(cur, "habits", "user", "TEXT NOT NULL DEFAULT ''")
@@ -347,6 +350,9 @@ def init_db(logger):
             """
         )
 
+        from workspace_tasks import import_legacy_daily_tasks
+
+        import_legacy_daily_tasks(conn)
         conn.commit()
         logger.info("SQLite database is ready at %s", DATABASE_PATH)
     except Exception:

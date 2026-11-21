@@ -79,7 +79,6 @@ from database.db import get_db_connection, init_db
 from utils.calculations import (
     build_health_guidance,
     calculate_health_insight,
-    compute_streak_from_history,
     generate_daily_plan,
     generate_start_day_plan,
 )
@@ -93,7 +92,6 @@ from utils.helpers import (
     handle_uncaught_exception,
     login_required,
     normalize_career_text,
-    normalize_date_history,
     normalize_priority,
     normalize_study_subjects,
     normalize_task_list,
@@ -103,6 +101,7 @@ from utils.helpers import (
     safe_render_template,
     set_app_logger,
 )
+import workspace_tasks as task_store
 
 try:
     from openai import OpenAI
@@ -143,6 +142,8 @@ if not configured_secret_key:
 CHAT_SESSIONS = {}
 PENDING_AI_TASKS = {}
 AUTH_FORM_ENDPOINTS = {"login", "register", "forgot_password", "reset_password", "change_password", "logout"}
+TASK_FORM_ENDPOINTS = {"workspace_create_task", "workspace_edit_task", "workspace_set_task_status", "workspace_delete_task"}
+TASK_PRIORITY_ORDER = {"High": 0, "Medium": 1, "Low": 2}
 RESET_LINK_LIFETIME = timedelta(hours=1)
 RESET_RESEND_INTERVAL = timedelta(minutes=1)
 
@@ -232,8 +233,10 @@ def auth_form_token():
 
 @app.before_request
 def check_auth_form_token():
-    if request.method != "POST" or request.endpoint not in AUTH_FORM_ENDPOINTS:
+    if request.method != "POST" or request.endpoint not in AUTH_FORM_ENDPOINTS | TASK_FORM_ENDPOINTS:
         return None
+    if request.endpoint in TASK_FORM_ENDPOINTS and not current_user.is_authenticated:
+        return redirect(url_for("login"))
     expected = session.get("auth_form_token")
     submitted = request.form.get("auth_form_token", "").encode()
     if not expected or not secrets.compare_digest(expected.encode(), submitted):
@@ -246,7 +249,7 @@ def check_auth_form_token():
 
 @app.after_request
 def set_auth_response_headers(response):
-    if request.endpoint in AUTH_FORM_ENDPOINTS:
+    if request.endpoint in AUTH_FORM_ENDPOINTS | TASK_FORM_ENDPOINTS | {"dashboard", "workspace_tasks"}:
         response.headers["Cache-Control"] = "no-store"
     if request.endpoint == "reset_password":
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -609,263 +612,57 @@ def get_today_exercise_minutes(user=None):
     return sum(int(item["duration"]) for item in workouts)
 
 
-def get_today_user_lookup(user=None, user_id=None):
-    return {
-        "username": user or get_current_username(),
-        "user_id": user_id or get_current_user_id(),
-        "today": get_today_string(),
-    }
-
-
-def get_today_task_records(user=None):
-    identity = get_today_user_lookup(user=user)
-    if not identity["username"]:
-        return []
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, name, priority, completed
-        FROM tasks
-        WHERE user = ? AND entry_date = ? AND task_type = 'daily' AND is_cleared = 0
-        ORDER BY
-            CASE priority
-                WHEN 'High' THEN 1
-                WHEN 'Medium' THEN 2
-                ELSE 3
-            END,
-            id DESC
-        """,
-        (identity["username"], identity["today"]),
+def get_today_task_records():
+    today = get_current_time().date()
+    tasks = task_store.list_tasks(
+        get_current_user_id(), current_user.username, today=today, task_type="daily", entry_date=today,
     )
-    rows = cur.fetchall()
-    conn.close()
-
     return [
         {
-            "id": row[0],
-            "name": row[1],
-            "priority": normalize_priority(row[2]),
-            "completed": bool(row[3]),
+            "id": task["id"],
+            "name": task["title"],
+            "priority": task["priority"],
+            "completed": task["completed"],
             "type": "daily",
         }
-        for row in rows
+        for task in sorted(tasks, key=lambda task: TASK_PRIORITY_ORDER[task["priority"]])
     ]
 
 
-def get_long_term_task_records(user=None):
-    identity = get_today_user_lookup(user=user)
-    if not identity["username"]:
+def get_long_term_task_records():
+    if not current_user.is_authenticated:
         return []
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, name, priority, streak_count, last_completed_date, completion_history_json
-        FROM tasks
-        WHERE user = ? AND task_type = 'long_term' AND is_cleared = 0
-        ORDER BY
-            CASE priority
-                WHEN 'High' THEN 1
-                WHEN 'Medium' THEN 2
-                ELSE 3
-            END,
-            id DESC
-        """,
-        (identity["username"],),
+    tasks = task_store.list_tasks(
+        get_current_user_id(), current_user.username, today=get_current_time().date(), task_type="long_term",
     )
-    rows = cur.fetchall()
-    conn.close()
-
-    tasks = []
-    for row in rows:
-        history = normalize_date_history(row[5])
-        tasks.append(
-            {
-                "id": row[0],
-                "name": row[1],
-                "priority": normalize_priority(row[2]),
-                "streak_count": compute_streak_from_history(history),
-                "last_completed_date": row[4],
-                "completed": identity["today"] in set(history),
-                "type": "long_term",
-            }
-        )
-
-    return tasks
-
-
-def get_today_task_priority_lookup(user=None):
-    lookup = {}
-    for task in get_today_task_records(user):
-        lookup.setdefault(task["name"], task["priority"])
-    return lookup
-
-
-def sync_today_task_records(task_names, user=None, priority_lookup=None, completed_lookup=None):
-    identity = get_today_user_lookup(user=user)
-    if not identity["username"]:
-        return
-
-    priority_lookup = priority_lookup or {}
-    completed_lookup = set(completed_lookup or [])
-    today = identity["today"]
-    normalized_tasks = normalize_task_list(task_names)
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, name
-        FROM tasks
-        WHERE user = ? AND entry_date = ? AND task_type = 'daily' AND is_cleared = 0
-        """,
-        (identity["username"], today),
-    )
-    existing_rows = cur.fetchall()
-    existing_lookup = {row[1]: row[0] for row in existing_rows}
-
-    for task_name in normalized_tasks:
-        if task_name in existing_lookup:
-            cur.execute(
-                """
-                UPDATE tasks
-                SET priority = ?, completed = ?, user_id = ?
-                WHERE id = ?
-                """,
-                (
-                    normalize_priority(priority_lookup.get(task_name)),
-                    1 if task_name in completed_lookup else 0,
-                    identity["user_id"],
-                    existing_lookup[task_name],
-                ),
-            )
-            continue
-
-        cur.execute(
-            """
-            INSERT INTO tasks (
-                name,
-                user,
-                user_id,
-                entry_date,
-                priority,
-                task_type,
-                completed,
-                streak_count,
-                completion_history_json,
-                is_cleared,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, 'daily', ?, 0, '[]', 0, ?)
-            """,
-            (
-                task_name,
-                identity["username"],
-                identity["user_id"],
-                today,
-                normalize_priority(priority_lookup.get(task_name)),
-                1 if task_name in completed_lookup else 0,
-                get_current_time().isoformat(timespec="seconds"),
-            ),
-        )
-
-    for existing_name, existing_id in existing_lookup.items():
-        if existing_name not in normalized_tasks:
-            cur.execute("UPDATE tasks SET is_cleared = 1 WHERE id = ?", (existing_id,))
-
-    conn.commit()
-    conn.close()
+    return [
+        {
+            "id": task["id"],
+            "name": task["title"],
+            "priority": task["priority"],
+            "completed": task["completed"],
+            "streak_count": task["streak_count"],
+            "last_completed_date": task["last_completed_date"],
+            "type": "long_term",
+        }
+        for task in sorted(tasks, key=lambda task: TASK_PRIORITY_ORDER[task["priority"]])
+    ]
 
 
 def add_user_task_from_ai(task_name, priority):
-    current_user = get_current_username()
-    current_user_id = get_current_user_id()
-    today = get_today_string()
-    cleaned_task_name = str(task_name or "").strip()
-    normalized_priority = normalize_priority(priority)
-
-    if not current_user or not current_user_id:
+    user_id = get_current_user_id()
+    if not user_id:
         raise RuntimeError("Please log in before adding tasks.")
-
-    if not cleaned_task_name:
-        raise ValueError("Task name is required.")
-
-    conn = get_db_connection()
+    title = str(task_name or "").strip()
     try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT tasks_json
-            FROM daily_entries
-            WHERE user = ? AND entry_date = ? AND is_cleared = 0
-            """,
-            (current_user, today),
+        task_store.create_task(
+            user_id, current_user.username, title=title, priority=normalize_priority(priority),
+            timestamp=get_current_time(),
         )
-        daily_entry_row = cur.fetchone()
-        if not daily_entry_row:
-            raise RuntimeError("Please complete today's setup first before adding tasks.")
-
-        raw_tasks_json = daily_entry_row[0] or "[]"
-        try:
-            daily_tasks = json.loads(raw_tasks_json)
-        except json.JSONDecodeError:
-            daily_tasks = []
-
-        daily_tasks = normalize_task_list(daily_tasks)
-        existing_task_names = {item.casefold() for item in daily_tasks}
-        if cleaned_task_name.casefold() in existing_task_names:
-            return f"{cleaned_task_name} is already in your tasks."
-
-        daily_tasks.append(cleaned_task_name)
-
-        cur.execute(
-            """
-            UPDATE daily_entries
-            SET tasks_json = ?
-            WHERE user = ? AND entry_date = ? AND is_cleared = 0
-            """,
-            (json.dumps(daily_tasks), current_user, today),
-        )
-
-        cur.execute(
-            """
-            INSERT INTO tasks (
-                name,
-                user,
-                user_id,
-                entry_date,
-                priority,
-                task_type,
-                completed,
-                streak_count,
-                completion_history_json,
-                is_cleared,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, 'daily', 0, 0, '[]', 0, ?)
-            """,
-            (
-                cleaned_task_name,
-                current_user,
-                current_user_id,
-                today,
-                normalized_priority,
-                get_current_time().isoformat(timespec="seconds"),
-            ),
-        )
-
-        conn.commit()
-    except sqlite3.Error as exc:
-        conn.rollback()
+    except sqlite3.Error as error:
         app.logger.exception("Failed to add a task from AI tool use.")
-        raise RuntimeError("I couldn't add that task right now. Please try again.") from exc
-    finally:
-        conn.close()
-
-    return f"I have added {cleaned_task_name} to your tasks!"
+        raise RuntimeError("I couldn't add that task right now. Please try again.") from error
+    return f"I have added {title} to your tasks!"
 
 
 def save_energy_log(score, answers, user_id=None):
@@ -1018,13 +815,6 @@ def build_dashboard_state(today_entry):
     )
     remaining_study_hours = max(study_goal - study_hours, 0)
     daily_tasks = get_today_task_records()
-    if today_entry["tasks"] and not daily_tasks:
-        sync_today_task_records(
-            today_entry["tasks"],
-            current_user,
-            completed_lookup=today_entry["completed_tasks"],
-        )
-        daily_tasks = get_today_task_records()
     long_term_tasks = get_long_term_task_records()
     workouts = get_today_workouts()
     calories_burned = get_today_calories()
@@ -1496,7 +1286,7 @@ def get_dashboard_context():
     current_user = get_current_username()
     today_entry = get_today_entry(current_user)
     workouts = get_today_workouts(current_user)
-    long_term_tasks = get_long_term_task_records(current_user)
+    long_term_tasks = get_long_term_task_records()
     health_data = get_latest_health_data()
     career_study = get_career_study_snapshot(current_user)
     pipeline_entries = get_career_pipeline_entries(current_user)
@@ -1517,15 +1307,13 @@ def get_dashboard_context():
             "- Health Insight: Not available yet"
         )
 
+    backlog_tasks = [
+        task["title"]
+        for task in task_store.list_tasks(get_current_user_id(), current_user, today=get_current_time().date(), limit=8)
+    ]
+
     conn = get_db_connection()
     cur = conn.cursor()
-
-    cur.execute(
-        "SELECT name FROM tasks WHERE user = ? AND is_cleared = 0 ORDER BY id DESC LIMIT 8",
-        (current_user,),
-    )
-    backlog_tasks = [row[0] for row in cur.fetchall()]
-
     cur.execute("SELECT habit, streak FROM habits WHERE user = ? ORDER BY id DESC LIMIT 8", (current_user,))
     habits = [{"name": row[0], "streak": row[1]} for row in cur.fetchall()]
 
@@ -1936,22 +1724,58 @@ def logout():
 @app.route("/")
 @login_required
 def home():
-    if get_today_entry():
-        return redirect(url_for("dashboard"))
+    return redirect(url_for("dashboard"))
 
+
+@app.get("/daily-setup")
+@login_required
+def daily_setup():
     return safe_render_template(
         "onboarding.html",
         current_user_display=format_user_name(get_current_username()),
-        day_notice="New day started. Ready to plan?" if request.args.get("day_reset") == "1" else None,
+        day_notice="Update your daily setup. Your tasks and workouts are saved." if request.args.get("day_reset") == "1" else None,
     )
 
 
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    if request.args.get("legacy") == "1" or request.args.get("page") == "activity" or request.args.get("open_ai") == "1":
+        return render_legacy_dashboard()
+
+    today = get_current_time().date()
+    tasks = task_store.list_tasks(get_current_user_id(), current_user.username, today=today)
+    open_tasks = [task for task in tasks if not task["completed"]]
+    today_tasks = [
+        task for task in open_tasks
+        if (task["due_date"] and task["due_date"] <= today)
+        or (not task["due_date"] and task["task_type"] == "daily" and task["entry_date"] == today)
+    ]
+    today_tasks.sort(key=lambda task: (
+        not (task["due_date"] and task["due_date"] < today),
+        TASK_PRIORITY_ORDER[task["priority"]],
+        task["due_date"] or today,
+        task["id"],
+    ))
+    upcoming_tasks = sorted(
+        (task for task in open_tasks if task["due_date"] and task["due_date"] > today),
+        key=lambda task: (task["due_date"], TASK_PRIORITY_ORDER[task["priority"]], task["id"]),
+    )
+    return safe_render_template(
+        "workspace/today.html",
+        active_page="today",
+        display_name=current_user.username,
+        today=today,
+        next_task=today_tasks[0] if today_tasks else None,
+        priority_tasks=today_tasks[1:],
+        upcoming_tasks=upcoming_tasks,
+    )
+
+
+def render_legacy_dashboard():
     today_entry = get_today_entry()
     if not today_entry:
-        return redirect(url_for("home"))
+        return redirect(url_for("daily_setup"))
     career_study = get_career_study_snapshot(get_current_username())
     dashboard_state = build_dashboard_state(today_entry)
 
@@ -1963,6 +1787,96 @@ def dashboard():
         subjects_studied_today=career_study["subjects_studied_today"],
         current_user_display=format_user_name(get_current_username()),
     )
+
+
+def render_workspace_tasks(*, editing_task=None, form_values=None, form_error=None, return_to="tasks"):
+    today = get_current_time().date()
+    tasks = [] if editing_task else task_store.list_tasks(get_current_user_id(), current_user.username, today=today)
+    return safe_render_template(
+        "workspace/tasks.html",
+        active_page="edit" if editing_task else "tasks",
+        display_name=current_user.username,
+        today=today,
+        tasks=tasks,
+        editing_task=editing_task,
+        form_values=form_values or {},
+        form_error=form_error,
+        return_to=return_to,
+    )
+
+
+def task_form_values():
+    return {name: request.form.get(name, "") for name in ("title", "priority", "due_date")}
+
+
+def redirect_after_task_change():
+    destination = "dashboard" if request.form.get("return_to") == "today" else "workspace_tasks"
+    return redirect(url_for(destination), code=303)
+
+
+@app.get("/workspace/tasks")
+@login_required
+def workspace_tasks():
+    return render_workspace_tasks()
+
+
+@app.post("/workspace/tasks")
+@login_required
+def workspace_create_task():
+    values = task_form_values()
+    try:
+        task_store.create_task(get_current_user_id(), current_user.username, timestamp=get_current_time(), **values)
+    except task_store.TaskValidationError as error:
+        return render_workspace_tasks(form_values=values, form_error=str(error)), 400
+    flash("Task added.", "success")
+    return redirect_after_task_change()
+
+
+@app.route("/workspace/tasks/<int:task_id>/edit", methods=["GET", "POST"])
+@login_required
+def workspace_edit_task(task_id):
+    owner_id, username = get_current_user_id(), current_user.username
+    editing_task = task_store.get_task(owner_id, username, task_id, today=get_current_time().date())
+    if request.method == "POST":
+        values = task_form_values()
+        try:
+            task_store.update_task(owner_id, username, task_id, **values)
+        except task_store.TaskValidationError as error:
+            return render_workspace_tasks(
+                editing_task=editing_task, form_values=values, form_error=str(error), return_to=request.form.get("return_to"),
+            ), 400
+        flash("Task updated.", "success")
+        return redirect_after_task_change()
+    return render_workspace_tasks(editing_task=editing_task, return_to=request.args.get("return_to"))
+
+
+@app.post("/workspace/tasks/<int:task_id>/status")
+@login_required
+def workspace_set_task_status(task_id):
+    completed = request.form.get("completed")
+    if completed not in {"0", "1"}:
+        return "Invalid task status.", 400
+    task_store.set_task_completed(
+        get_current_user_id(), current_user.username, task_id,
+        completed=completed == "1", timestamp=get_current_time(),
+    )
+    flash("Task completed." if completed == "1" else "Task reopened.", "success")
+    return redirect_after_task_change()
+
+
+@app.post("/workspace/tasks/<int:task_id>/delete")
+@login_required
+def workspace_delete_task(task_id):
+    task_store.delete_task(get_current_user_id(), current_user.username, task_id)
+    flash("Task deleted.", "success")
+    return redirect_after_task_change()
+
+
+@app.errorhandler(task_store.TaskNotFound)
+def handle_missing_task(error):
+    if request.is_json or request.method == "DELETE":
+        return jsonify({"error": "Task not found."}), 404
+    return "Task not found.", 404
 
 
 @app.route("/career")
@@ -2059,216 +1973,58 @@ def update_career_study():
 @app.route("/add_task", methods=["POST"])
 @api_login_required
 def add_task():
-    current_user = get_current_username()
-    data = request.get_json(silent=True) or {}
-    task = (data.get("task") or "").strip()
-    priority = normalize_priority(data.get("priority"))
-    task_type = (data.get("type") or "daily").strip().lower()
-
-    if not task:
-        return jsonify({"error": "Task is required."}), 400
-
-    if task_type not in {"daily", "long_term"}:
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Task details are required."}), 400
+    task_type = data.get("type") or "daily"
+    if not isinstance(task_type, str):
         return jsonify({"error": "Unsupported task type."}), 400
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    if task_type == "daily":
-        today_entry = get_today_entry(current_user)
-        if not today_entry:
-            conn.close()
-            return jsonify({"error": "Please complete today's setup first."}), 400
-
-        existing_lookup = {item.casefold() for item in today_entry["tasks"]}
-        if task.casefold() in existing_lookup:
-            conn.close()
-            return jsonify({"error": "That task already exists for today."}), 400
-
-        updated_tasks = today_entry["tasks"] + [task]
-        cur.execute(
-            """
-            UPDATE daily_entries
-            SET tasks_json = ?
-            WHERE user = ? AND entry_date = ? AND is_cleared = 0
-            """,
-            (json.dumps(updated_tasks), current_user, today_entry["entry_date"]),
+    try:
+        task_store.create_task(
+            get_current_user_id(), current_user.username,
+            title=data.get("task"), priority=normalize_priority(data.get("priority")),
+            task_type=task_type.strip().lower(), timestamp=get_current_time(),
         )
-        conn.commit()
-        conn.close()
+    except task_store.TaskValidationError as error:
+        return jsonify({"error": str(error)}), 400
 
-        priority_lookup = get_today_task_priority_lookup(current_user)
-        priority_lookup[task] = priority
-        sync_today_task_records(
-            updated_tasks,
-            current_user,
-            priority_lookup,
-            today_entry["completed_tasks"],
-        )
-    else:
-        cur.execute(
-            """
-            SELECT id
-            FROM tasks
-            WHERE user = ? AND task_type = 'long_term' AND lower(name) = lower(?) AND is_cleared = 0
-            """,
-            (current_user, task),
-        )
-        if cur.fetchone():
-            conn.close()
-            return jsonify({"error": "That long-term goal already exists."}), 400
-
-        cur.execute(
-            """
-            INSERT INTO tasks (
-                name,
-                user,
-                user_id,
-                entry_date,
-                priority,
-                task_type,
-                completed,
-                streak_count,
-                last_completed_date,
-                completion_history_json,
-                is_cleared,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, 'long_term', 0, 0, NULL, '[]', 0, ?)
-            """,
-            (
-                task,
-                current_user,
-                get_current_user_id(),
-                get_today_string(),
-                priority,
-                get_current_time().isoformat(timespec="seconds"),
-            ),
-        )
-        conn.commit()
-        conn.close()
-
+    today_entry = get_today_entry()
     return jsonify({
         "message": "Task added.",
-        "dashboard_state": build_dashboard_state(get_today_entry(current_user)),
+        "dashboard_state": build_dashboard_state(today_entry) if today_entry else None,
     })
 
 
 @app.route("/tasks", methods=["GET"])
 @api_login_required
 def get_tasks():
-    current_user = get_current_username()
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, name, priority, entry_date, task_type, completed, streak_count, last_completed_date
-        FROM tasks
-        WHERE user = ? AND is_cleared = 0
-        ORDER BY id DESC
-        """,
-        (current_user,),
-    )
-    rows = cur.fetchall()
-    conn.close()
-
-    tasks = [
+    tasks = task_store.list_tasks(get_current_user_id(), current_user.username, today=get_current_time().date())
+    return jsonify([
         {
-            "id": row[0],
-            "name": row[1],
-            "priority": row[2],
-            "entry_date": row[3],
-            "type": row[4],
-            "completed": bool(row[5]),
-            "streak_count": row[6] or 0,
-            "last_completed_date": row[7],
+            "id": task["id"],
+            "name": task["title"],
+            "priority": task["priority"],
+            "entry_date": task["entry_date"].isoformat() if task["entry_date"] else "",
+            "type": task["task_type"],
+            "completed": task["stored_completed"],
+            "streak_count": task["stored_streak_count"],
+            "last_completed_date": task["last_completed_date"],
         }
-        for row in rows
-    ]
-    return jsonify(tasks)
+        for task in tasks
+    ])
 
 
 @app.route("/delete_task/<int:task_id>", methods=["DELETE"])
 @api_login_required
 def delete_task(task_id):
-    current_user = get_current_username()
-    conn = get_db_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            SELECT id, name, task_type, entry_date
-            FROM tasks
-            WHERE id = ? AND user = ? AND is_cleared = 0
-            """,
-            (task_id, current_user),
-        )
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return jsonify({"error": "Task not found."}), 404
-
-        _, task_name, task_type, entry_date = row
-
-        cur.execute("UPDATE tasks SET is_cleared = 1 WHERE id = ? AND user = ?", (task_id, current_user))
-
-        if task_type == "daily":
-            cur.execute(
-                """
-                SELECT tasks_json, completed_tasks_json
-                FROM daily_entries
-                WHERE user = ? AND entry_date = ? AND is_cleared = 0
-                """,
-                (current_user, entry_date),
-            )
-            daily_entry_row = cur.fetchone()
-            if daily_entry_row:
-                try:
-                    daily_tasks = json.loads(daily_entry_row[0] or "[]")
-                except json.JSONDecodeError:
-                    daily_tasks = []
-
-                try:
-                    completed_tasks = json.loads(daily_entry_row[1] or "[]")
-                except json.JSONDecodeError:
-                    completed_tasks = []
-
-                normalized_name = str(task_name).casefold()
-                updated_tasks = [
-                    item for item in normalize_task_list(daily_tasks)
-                    if str(item).casefold() != normalized_name
-                ]
-                updated_completed_tasks = [
-                    item for item in normalize_task_list(completed_tasks)
-                    if str(item).casefold() != normalized_name
-                ]
-
-                cur.execute(
-                    """
-                    UPDATE daily_entries
-                    SET tasks_json = ?, completed_tasks_json = ?
-                    WHERE user = ? AND entry_date = ? AND is_cleared = 0
-                    """,
-                    (
-                        json.dumps(updated_tasks),
-                        json.dumps(updated_completed_tasks),
-                        current_user,
-                        entry_date,
-                    ),
-                )
-
-        conn.commit()
-    finally:
-        conn.close()
-
-    today_entry = get_today_entry(current_user)
-    dashboard_state = build_dashboard_state(today_entry) if today_entry else None
-
+    task_store.delete_task(get_current_user_id(), current_user.username, task_id)
+    today_entry = get_today_entry()
     return jsonify({
         "status": "deleted",
         "message": "Task deleted.",
-        "dashboard_state": dashboard_state,
+        "dashboard_state": build_dashboard_state(today_entry) if today_entry else None,
     })
+
 
 @app.route("/add_habit", methods=["POST"])
 @api_login_required
@@ -2345,7 +2101,7 @@ def get_stats():
 def dashboard_data():
     today_entry = get_today_entry()
     if not today_entry:
-        return jsonify({"redirect_url": url_for("home")}), 404
+        return jsonify({"redirect_url": url_for("daily_setup")}), 404
 
     return jsonify(build_dashboard_state(today_entry))
 
@@ -2465,33 +2221,15 @@ def update_day_metric():
 @app.route("/reset_day", methods=["POST"])
 @api_login_required
 def reset_day():
-    current_user = get_current_username()
-    today = get_today_string()
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE daily_entries SET is_cleared = 1 WHERE user = ? AND entry_date = ? AND is_cleared = 0",
-        (current_user, today),
-    )
-    cur.execute(
-        """
-        UPDATE tasks
-        SET is_cleared = 1
-        WHERE user = ? AND entry_date = ? AND task_type = 'daily' AND is_cleared = 0
-        """,
-        (current_user, today),
-    )
-    cur.execute(
-        "UPDATE workouts SET is_cleared = 1 WHERE user = ? AND entry_date = ? AND is_cleared = 0",
-        (current_user, today),
-    )
-    conn.commit()
-    conn.close()
+    with closing(get_db_connection()) as conn, conn:
+        conn.execute(
+            "UPDATE daily_entries SET is_cleared = 1 WHERE user = ? AND entry_date = ? AND is_cleared = 0",
+            (current_user.username, get_today_string()),
+        )
 
     return jsonify({
-        "message": "Day reset. New day started. Ready to plan?",
-        "redirect_url": url_for("home", day_reset=1),
+        "message": "Daily setup is ready to update.",
+        "redirect_url": url_for("daily_setup", day_reset=1),
     })
 
 
@@ -2556,103 +2294,43 @@ def add_workout():
 @app.route("/toggle_task_status", methods=["POST"])
 @api_login_required
 def toggle_day_task():
-    current_user = get_current_username()
-    today_entry = get_today_entry()
-    if not today_entry:
-        return jsonify({"error": "Please complete today's setup first."}), 400
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or type(data.get("completed")) is not bool:
+        return jsonify({"error": "A task completion status is required."}), 400
+    task_type = data.get("type") or "daily"
+    if not isinstance(task_type, str) or task_type.strip().lower() not in {"daily", "long_term"}:
+        return jsonify({"error": "Unsupported task type."}), 400
+    task_type = task_type.strip().lower()
 
-    data = request.get_json(silent=True) or {}
-    task_name = (data.get("task_name") or "").strip()
-    completed = bool(data.get("completed"))
-    task_type = (data.get("type") or "daily").strip().lower()
+    user_id, username = get_current_user_id(), current_user.username
+    timestamp = get_current_time()
+    today = timestamp.date()
     task_id = data.get("task_id")
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    if task_type == "long_term":
-        try:
-            task_id = int(task_id)
-        except (TypeError, ValueError):
-            conn.close()
-            return jsonify({"error": "Long-term task not found."}), 404
-
-        cur.execute(
-            """
-            SELECT completion_history_json
-            FROM tasks
-            WHERE id = ? AND user = ? AND task_type = 'long_term' AND is_cleared = 0
-            """,
-            (task_id, current_user),
-        )
-        row = cur.fetchone()
-        if not row:
-            conn.close()
-            return jsonify({"error": "Long-term task not found."}), 404
-
-        history = normalize_date_history(row[0])
-        today = get_today_string()
-        if completed and today not in history:
-            history.append(today)
-        if not completed and today in history:
-            history.remove(today)
-        history = normalize_date_history(history)
-        streak_count = compute_streak_from_history(history)
-        last_completed_date = history[-1] if history else None
-
-        cur.execute(
-            """
-            UPDATE tasks
-            SET completed = ?, streak_count = ?, last_completed_date = ?, completion_history_json = ?
-            WHERE id = ?
-            """,
-            (
-                1 if completed else 0,
-                streak_count,
-                last_completed_date,
-                json.dumps(history),
-                task_id,
-            ),
+    if task_id is None and task_type == "daily":
+        # Older dashboard clients sent the name instead of the stable task ID.
+        task_name = data.get("task_name")
+        if not isinstance(task_name, str) or not task_name.strip():
+            return jsonify({"error": "Task not found."}), 404
+        task = next(
+            (row for row in task_store.list_tasks(user_id, username, today=today, task_type="daily", entry_date=today)
+             if row["title"] == task_name.strip()),
+            None,
         )
     else:
-        if not task_name or task_name not in today_entry["tasks"]:
-            conn.close()
-            return jsonify({"error": "Task not found for today."}), 404
+        try:
+            task_id = int(str(task_id))
+        except ValueError:
+            return jsonify({"error": "Task not found."}), 404
+        task = task_store.get_task(user_id, username, task_id, today=today)
 
-        completed_tasks = set(today_entry["completed_tasks"])
-        if completed:
-            completed_tasks.add(task_name)
-        else:
-            completed_tasks.discard(task_name)
+    if not task or task["task_type"] != task_type or (task_type == "daily" and task["entry_date"] != today):
+        return jsonify({"error": "Task not found."}), 404
+    task_store.set_task_completed(user_id, username, task["id"], completed=data["completed"], timestamp=timestamp)
 
-        filtered_completed_tasks = [
-            task for task in today_entry["tasks"]
-            if task in completed_tasks
-        ]
-
-        cur.execute(
-            """
-            UPDATE daily_entries
-            SET completed_tasks_json = ?
-            WHERE user = ? AND entry_date = ?
-            """,
-            (json.dumps(filtered_completed_tasks), current_user, today_entry["entry_date"]),
-        )
-        cur.execute(
-            """
-            UPDATE tasks
-            SET completed = ?
-            WHERE user = ? AND entry_date = ? AND task_type = 'daily' AND name = ? AND is_cleared = 0
-            """,
-            (1 if completed else 0, current_user, today_entry["entry_date"], task_name),
-        )
-
-    conn.commit()
-    conn.close()
-
+    today_entry = get_today_entry()
     return jsonify({
         "message": "Task progress updated.",
-        "dashboard_state": build_dashboard_state(get_today_entry()),
+        "dashboard_state": build_dashboard_state(today_entry) if today_entry else None,
     })
 
 
@@ -2710,12 +2388,13 @@ def submit_energy():
 @app.route("/submit_day_data", methods=["POST"])
 @api_login_required
 def submit_day_data():
-    # Save or replace today's setup in case the user re-submits before midnight.
-    current_user = get_current_username()
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get("tasks"), list):
+        return jsonify({"error": "Please add at least one task for today."}), 400
 
-    tasks = normalize_task_list(data.get("tasks") or [])
-    mood = (data.get("mood") or "").strip()
+    tasks = normalize_task_list(data["tasks"])
+    mood = data.get("mood")
+    mood = mood.strip() if isinstance(mood, str) else ""
     exercised = parse_exercise_value(data.get("exercised"))
 
     try:
@@ -2726,7 +2405,7 @@ def submit_day_data():
     if not tasks:
         return jsonify({"error": "Please add at least one task for today."}), 400
 
-    if sleep_hours is None or sleep_hours < 0 or sleep_hours > 24:
+    if sleep_hours is None or not 0 <= sleep_hours <= 24:
         return jsonify({"error": "Hours slept must be a number between 0 and 24."}), 400
 
     if mood not in {"Focused", "Neutral", "Stressed", "Low Energy"}:
@@ -2736,81 +2415,37 @@ def submit_day_data():
         return jsonify({"error": "Please choose whether you exercised today."}), 400
 
     plan = generate_start_day_plan(tasks, sleep_hours, mood, exercised)
-    entry_date = get_today_string()
-    created_at = get_current_time().isoformat(timespec="seconds")
-    existing_entry = get_today_entry()
-    completed_tasks = []
-    if existing_entry:
-        completed_tasks = [
-            task for task in existing_entry["completed_tasks"]
-            if task in tasks
-        ]
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO daily_entries (
-            user,
-            entry_date,
-            tasks_json,
-            sleep_hours,
-            study_hours_total,
-            mood,
-            energy_level,
-            exercised,
-            plan,
-            completed_tasks_json,
-            energy_percent,
-            calories_override,
-            energy_answers_json,
-            is_cleared,
-            created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user, entry_date) DO UPDATE SET
-            tasks_json = excluded.tasks_json,
-            sleep_hours = excluded.sleep_hours,
-            study_hours_total = daily_entries.study_hours_total,
-            mood = excluded.mood,
-            energy_level = excluded.energy_level,
-            exercised = excluded.exercised,
-            plan = excluded.plan,
-            completed_tasks_json = excluded.completed_tasks_json,
-            energy_percent = excluded.energy_percent,
-            calories_override = excluded.calories_override,
-            energy_answers_json = excluded.energy_answers_json,
-            is_cleared = excluded.is_cleared,
-            created_at = excluded.created_at
-        """,
-        (
-            current_user,
-            entry_date,
-            json.dumps(tasks),
-            sleep_hours,
-            existing_entry["study_hours_total"] if existing_entry else 0,
-            mood,
-            0,
-            int(exercised),
-            plan,
-            json.dumps(completed_tasks),
-            existing_entry["energy_percent"] if existing_entry else 0,
-            existing_entry["calories_override"] if existing_entry else None,
-            json.dumps(existing_entry["energy_answers"] if existing_entry else []),
-            0,
-            created_at,
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-    sync_today_task_records(tasks, current_user, completed_lookup=completed_tasks)
+    username = current_user.username
+    now = get_current_time()
+    entry_date = now.date().isoformat()
+    try:
+        with closing(get_db_connection()) as conn, conn:
+            conn.execute(
+                """
+                INSERT INTO daily_entries (
+                    user, entry_date, tasks_json, sleep_hours, study_hours_total,
+                    mood, energy_level, exercised, plan, completed_tasks_json,
+                    energy_percent, calories_override, energy_answers_json, is_cleared, created_at
+                ) VALUES (?, ?, '[]', ?, 0, ?, 0, ?, ?, '[]', 0, NULL, '[]', 0, ?)
+                ON CONFLICT(user, entry_date) DO UPDATE SET
+                    sleep_hours = excluded.sleep_hours,
+                    mood = excluded.mood,
+                    energy_level = excluded.energy_level,
+                    exercised = excluded.exercised,
+                    plan = excluded.plan,
+                    is_cleared = excluded.is_cleared,
+                    created_at = excluded.created_at
+                """,
+                (username, entry_date, sleep_hours, mood, int(exercised), plan, now.isoformat(timespec="seconds")),
+            )
+            task_store.add_daily_setup_tasks(
+                conn, get_current_user_id(), username, task_names=tasks, timestamp=now,
+            )
+    except task_store.TaskValidationError as error:
+        return jsonify({"error": str(error)}), 400
 
     session["last_onboarding_date"] = entry_date
-
-    return jsonify({
-        "plan": plan,
-        "redirect_url": url_for("dashboard")
-    })
+    return jsonify({"plan": plan, "redirect_url": url_for("dashboard", legacy=1)})
 
 
 @app.route("/analyze_health", methods=["POST"])
