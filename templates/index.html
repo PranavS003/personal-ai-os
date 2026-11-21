@@ -29,8 +29,9 @@
                                 <p id="dashboardHeroText" class="hero-text">Your day at a glance.</p>
                             </div>
                             <div class="workspace-actions mobile-workspace-actions">
-                                <button id="resetDay" type="button" class="ghost-button danger-button">Reset Day</button>
-                                <a href="{{ url_for('logout') }}" class="ghost-button logout-link" role="button">Logout</a>
+                                <button id="resetDay" type="button" class="ghost-button">Redo setup</button>
+                                <a href="{{ url_for('change_password') }}" class="ghost-button logout-link">Change password</a>
+                                {% include 'components/logout_form.html' %}
                                 <div class="support-container">
                                     <button type="button" id="supportButton" class="ghost-button support-btn" aria-expanded="false" aria-controls="supportPanel">
                                         Support

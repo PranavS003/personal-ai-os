@@ -1,26 +1,26 @@
-from datetime import timedelta
+from datetime import date, timedelta
 
 from utils.helpers import (
     format_progress_value,
     get_current_time,
-    get_today_string,
     normalize_date_history,
     normalize_study_subjects,
-    parse_iso_date,
 )
 
 
-def compute_streak_from_history(values):
+def compute_streak_from_history(values, *, today=None):
     history = normalize_date_history(values)
     if not history:
         return 0
 
     history_set = set(history)
-    current_day = parse_iso_date(get_today_string())
+    current_day = today or get_current_time().date()
     streak = 0
 
-    while current_day and current_day.isoformat() in history_set:
+    while current_day.isoformat() in history_set:
         streak += 1
+        if current_day == date.min:
+            break
         current_day -= timedelta(days=1)
 
     return streak

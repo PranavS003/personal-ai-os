@@ -147,6 +147,7 @@ function syncPageQuery(page = "dashboard", replace = false) {
         url.search = "";
     } else {
         url.pathname = "/dashboard";
+        url.searchParams.set("legacy", "1");
         if (page === "activity") {
             url.searchParams.set("page", "activity");
         } else {
@@ -1202,7 +1203,7 @@ function createDailyTaskCard(task) {
 
     return `
         <label class="task-tile task-compact-item task-premium-card ${task.completed ? "done" : ""}">
-            <input class="task-tile-toggle compact-task-toggle" type="checkbox" data-task-type="daily" data-task-name="${escapeHtml(task.name)}" ${task.completed ? "checked" : ""}>
+            <input class="task-tile-toggle compact-task-toggle" type="checkbox" data-task-type="daily" data-task-id="${task.id}" data-task-name="${escapeHtml(task.name)}" ${task.completed ? "checked" : ""}>
             <span class="task-status-dot" aria-hidden="true"></span>
             <span class="task-card-main">
                 <p class="task-tile-title task-compact-title">${escapeHtml(task.name)}</p>
@@ -1503,19 +1504,19 @@ async function handleQuickTaskSubmit(event) {
 }
 
 async function handleResetDay() {
-    const confirmed = window.confirm("Reset today's active dashboard data and start fresh?");
+    const confirmed = window.confirm("Redo today's setup? Your tasks and workout history will be kept.");
     if (!confirmed) {
         return;
     }
 
-    setDashboardFeedback("Resetting today...");
+    setDashboardFeedback("Opening daily setup...");
 
     try {
         const response = await fetch("/reset_day", { method: "POST" });
         const data = await response.json();
 
         if (!response.ok) {
-            setDashboardFeedback(data.error || "Could not reset the day.", true);
+            setDashboardFeedback(data.error || "Could not open daily setup.", true);
             return;
         }
 

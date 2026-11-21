@@ -1,0 +1,60 @@
+{% extends 'workspace/base.html' %}
+{% from 'workspace/components.html' import task_metadata, task_row, task_status %}
+{% block title %}Today{% endblock %}
+{% block content %}
+    <div class="page-heading">
+        <div>
+            <h1>Today</h1>
+            <p class="page-date"><time datetime="{{ today.isoformat() }}">{{ today.strftime('%A, %B') }} {{ today.day }}</time></p>
+        </div>
+        <a class="button button-primary" href="{{ url_for('workspace_tasks') }}#add-task">Add task</a>
+    </div>
+
+    {% if next_task or priority_tasks or upcoming_tasks %}
+        <div class="today-layout">
+            <div class="section-stack">
+                <section class="card next-task" aria-labelledby="next-task-heading">
+                    <h2 id="next-task-heading">Next action</h2>
+                    {% if next_task %}
+                        <p class="next-task-title">{{ next_task.title }}</p>
+                        {{ task_metadata(next_task, today) }}
+                        <div class="task-actions next-task-actions">
+                            {{ task_status(next_task, 'today', emphasized=true) }}
+                            <a class="button button-plain" href="{{ url_for('workspace_edit_task', task_id=next_task.id, return_to='today') }}" aria-label="Edit task: {{ next_task.title }}">Edit</a>
+                        </div>
+                    {% else %}
+                        <p class="empty-state">No task to start right now.</p>
+                    {% endif %}
+                </section>
+
+                <section class="card" aria-labelledby="priority-tasks-heading">
+                    <h2 id="priority-tasks-heading">Today and overdue</h2>
+                    {% if priority_tasks %}
+                        <ul class="task-list">
+                            {% for task in priority_tasks %}{{ task_row(task, today, 'today') }}{% endfor %}
+                        </ul>
+                    {% else %}
+                        <p class="empty-state">No other tasks due or planned for today.</p>
+                    {% endif %}
+                </section>
+            </div>
+
+            <section class="card" aria-labelledby="upcoming-tasks-heading">
+                <h2 id="upcoming-tasks-heading">Upcoming deadlines</h2>
+                {% if upcoming_tasks %}
+                    <ul class="task-list upcoming-tasks">
+                        {% for task in upcoming_tasks %}{{ task_row(task, today, 'today') }}{% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="empty-state">No upcoming deadlines.</p>
+                {% endif %}
+            </section>
+        </div>
+    {% else %}
+        <section class="card" aria-labelledby="empty-today-heading">
+            <h2 id="empty-today-heading">Nothing planned for today</h2>
+            <p class="empty-state">Add a task or review your task list.</p>
+            <a class="text-link" href="{{ url_for('workspace_tasks') }}">View tasks</a>
+        </section>
+    {% endif %}
+{% endblock %}
