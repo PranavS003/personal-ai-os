@@ -1,0 +1,10 @@
+{% extends "auth_base.html" %}
+{% set page_title = title %}
+{% set page_description = message %}
+
+{% block content %}
+    {% if retry_reset %}
+        <p class="auth-footer"><a href="{{ url_for('forgot_password') }}">Request a new reset link</a></p>
+    {% endif %}
+    <p class="auth-footer"><a href="{{ url_for('login') }}">Back to sign in</a></p>
+{% endblock %}

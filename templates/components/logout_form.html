@@ -1,0 +1,5 @@
+{% from "components/auth_fields.html" import csrf %}
+<form method="post" action="{{ url_for('logout') }}">
+    {{ csrf() }}
+    <button type="submit" class="ghost-button logout-link">Log out</button>
+</form>

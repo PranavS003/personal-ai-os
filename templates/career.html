@@ -340,7 +340,7 @@
                         </div>
                         <div class="career-toolbar">
                             <a href="{{ url_for('dashboard') }}" class="ghost-button logout-link" role="button">Back to Dashboard</a>
-                            <a href="{{ url_for('logout') }}" class="ghost-button logout-link" role="button">Logout</a>
+                            {% include 'components/logout_form.html' %}
                         </div>
                     </section>
 

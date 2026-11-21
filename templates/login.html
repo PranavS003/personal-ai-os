@@ -1,62 +1,23 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login | Personal AI OS</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-</head>
-<body class="page-fade auth-experience">
-    <div class="page-shell auth-shell">
-        <div class="ambient ambient-one"></div>
-        <div class="ambient ambient-two"></div>
-        <div class="ambient ambient-three"></div>
+{% extends "auth_base.html" %}
+{% from "components/auth_fields.html" import csrf, password_field %}
+{% set page_title = "Sign in" %}
 
-        <main class="auth-page">
-            <section class="auth-card modern-auth-card">
-                <div class="auth-copy">
-                    <p class="eyebrow">Personal AI OS</p>
-                    <h1>Welcome back</h1>
-                    <p class="hero-text">Log in to your planning workspace and pick up your day with a faster, cleaner flow.</p>
-                    <div class="auth-feature-list">
-                        <span class="auth-feature-pill">AI planner</span>
-                        <span class="auth-feature-pill">Task tracking</span>
-                        <span class="auth-feature-pill">Workout insights</span>
-                    </div>
-                </div>
-
-                <form method="post" action="{{ url_for('login') }}" class="daily-setup-form">
-                    {% with messages = get_flashed_messages() %}
-                        {% if messages %}
-                            {% for message in messages %}
-                                <p class="setup-feedback">{{ message }}</p>
-                            {% endfor %}
-                        {% endif %}
-                    {% endwith %}
-
-                    <div class="setup-group">
-                        <label for="email">Email</label>
-                        <input type="email" id="email" name="email" placeholder="Enter your email" autocomplete="email" required>
-                    </div>
-
-                    <div class="setup-group">
-                        <label for="password">Password</label>
-                        <input type="password" id="password" name="password" placeholder="Enter your password" autocomplete="current-password" required>
-                    </div>
-
-                    {% if error %}
-                        <p class="setup-feedback error">{{ error }}</p>
-                    {% endif %}
-
-                    <button type="submit" class="start-day-button">Login</button>
-                    <p class="auth-hint"><a href="{{ url_for('forgot_password') }}">Forgot Password?</a></p>
-                    <p class="auth-hint">New here? <a href="{{ url_for('register') }}">Create an account</a></p>
-                </form>
-            </section>
-        </main>
-    </div>
-</body>
-</html>
+{% block content %}
+    <form class="auth-form" method="post" action="{{ url_for('login') }}">
+        {{ csrf() }}
+        <div class="auth-field">
+            <label for="email">Email address</label>
+            <input id="email" name="email" type="email" value="{{ email }}" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+        </div>
+        {{ password_field("password", "Password", "current-password") }}
+        <div class="auth-options">
+            <label class="auth-checkbox">
+                <input type="checkbox" name="remember"{% if remember %} checked{% endif %}>
+                Keep me signed in
+            </label>
+            <a href="{{ url_for('forgot_password') }}">Forgot password?</a>
+        </div>
+        <button class="auth-primary" type="submit">Sign in</button>
+    </form>
+    <p class="auth-footer">New to Personal AI OS? <a href="{{ url_for('register') }}">Create an account</a></p>
+{% endblock %}

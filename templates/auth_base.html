@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ page_title }} | Personal AI OS</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
+    <script defer src="{{ url_for('static', filename='js/auth.js') }}"></script>
+</head>
+<body>
+    <main class="auth-shell">
+        <section class="auth-card" aria-labelledby="auth-title">
+            <p class="auth-brand">Personal AI OS</p>
+            <h1 id="auth-title">{{ page_title }}</h1>
+            {% if page_description %}<p class="auth-description">{{ page_description }}</p>{% endif %}
+            {% for message in get_flashed_messages() %}
+                <p class="auth-notice" role="status">{{ message }}</p>
+            {% endfor %}
+            {% if error %}<p class="auth-notice auth-error" role="alert">{{ error }}</p>{% endif %}
+            {% block content %}{% endblock %}
+        </section>
+    </main>
+</body>
+</html>

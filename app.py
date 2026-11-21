@@ -1,17 +1,22 @@
 import json
 import hashlib
+import hmac
 import importlib.util
 import os
 import secrets
 import smtplib
 import sqlite3
+import ssl
 import subprocess
 import sys
 import uuid
 from dataclasses import dataclass
+from contextlib import closing
 from datetime import date, timedelta
 from email.message import EmailMessage
 from pathlib import Path
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 
 REQUIREMENTS_FILE = Path(__file__).resolve().parent / "requirements.txt"
@@ -110,7 +115,10 @@ app = Flask(
     static_folder=str(STATIC_DIR),
     static_url_path="/static",
 )
-app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY") or DEFAULT_SECRET_KEY
+configured_secret_key = os.environ.get("FLASK_SECRET_KEY") or os.environ.get("SECRET_KEY")
+if os.environ.get("RENDER") and (not configured_secret_key or configured_secret_key == DEFAULT_SECRET_KEY):
+    raise RuntimeError("Set a stable FLASK_SECRET_KEY in Render before starting Personal AI OS.")
+app.secret_key = configured_secret_key or DEFAULT_SECRET_KEY
 app.config.update(SECRET_KEY=app.secret_key, **FLASK_CONFIG)
 
 login_manager = LoginManager()
@@ -127,13 +135,16 @@ prepare_runtime_paths(app.logger)
 if not os.environ.get("GROQ_API_KEY"):
     app.logger.warning("GROQ_API_KEY is not set. AI routes will stay available but return safe fallback messages.")
 
-if not os.environ.get("FLASK_SECRET_KEY") and not os.environ.get("SECRET_KEY"):
+if not configured_secret_key:
     app.logger.warning(
         "FLASK_SECRET_KEY is not set. Using a fixed development fallback secret; set a strong secret in production."
     )
 
 CHAT_SESSIONS = {}
 PENDING_AI_TASKS = {}
+AUTH_FORM_ENDPOINTS = {"login", "register", "forgot_password", "reset_password", "change_password", "logout"}
+RESET_LINK_LIFETIME = timedelta(hours=1)
+RESET_RESEND_INTERVAL = timedelta(minutes=1)
 
 
 def get_ai_client():
@@ -156,14 +167,22 @@ class DashboardUser(UserMixin):
     id: str
     username: str
     email: str
+    login_identity: str
 
     @classmethod
     def from_record(cls, record):
+        # Every password change invalidates the account's existing session and remember cookies.
+        identity_data = f"{record['id']}:{record['password_hash']}".encode()
+        signature = hmac.digest(app.secret_key.encode(), identity_data, "sha256").hex()
         return cls(
             id=str(record["id"]),
             username=record["username"],
             email=record["email"],
+            login_identity=f"{record['id']}:{signature}",
         )
+
+    def get_id(self):
+        return self.login_identity
 
 
 def get_user_by_id(user_id):
@@ -191,32 +210,55 @@ def get_user_by_id(user_id):
 
 
 @login_manager.user_loader
-def load_user(user_id):
+def load_user(identity):
+    user_id, separator, _ = identity.partition(":")
+    if not separator or not identity.isascii():
+        return None
     record = get_user_by_id(user_id)
     if not record:
         return None
-    return DashboardUser.from_record(record)
+    user = DashboardUser.from_record(record)
+    if secrets.compare_digest(user.get_id(), identity):
+        return user
+    return None
+
+
+@app.template_global()
+def auth_form_token():
+    if "auth_form_token" not in session:
+        session["auth_form_token"] = secrets.token_urlsafe(32)
+    return session["auth_form_token"]
 
 
 @app.before_request
-def keep_session_alive():
-    session.permanent = True
+def check_auth_form_token():
+    if request.method != "POST" or request.endpoint not in AUTH_FORM_ENDPOINTS:
+        return None
+    expected = session.get("auth_form_token")
+    submitted = request.form.get("auth_form_token", "").encode()
+    if not expected or not secrets.compare_digest(expected.encode(), submitted):
+        return safe_render_template(
+            "auth_message.html",
+            title="Form expired",
+            message="Go back to the form, refresh it, and try again.",
+        ), 400
 
-    if current_user.is_authenticated:
-        try:
-            session["user_id"] = int(current_user.get_id())
-        except (TypeError, ValueError):
-            session.pop("user_id", None)
+
+@app.after_request
+def set_auth_response_headers(response):
+    if request.endpoint in AUTH_FORM_ENDPOINTS:
+        response.headers["Cache-Control"] = "no-store"
+    if request.endpoint == "reset_password":
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
-def sign_in_user(user_record, remember=True):
-    login_user(
-        DashboardUser.from_record(user_record),
-        remember=remember,
-        duration=app.config["REMEMBER_COOKIE_DURATION"],
-    )
-    session["user_id"] = int(user_record["id"])
-    session.permanent = True
+def sign_in_user(user_record, remember=False):
+    session.clear()
+    if not remember:
+        # Flask-Login clears a remember cookie left over from a previous sign-in.
+        logout_user()
+    login_user(DashboardUser.from_record(user_record), remember=remember)
 
 
 def get_user_by_email(email):
@@ -312,124 +354,126 @@ def create_user_account(username, email, password):
     return user_id
 
 
-def update_user_password(user_id, password):
+def update_user_password(user, password):
     password_hash = generate_password_hash(password)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "UPDATE users SET password_hash = ? WHERE id = ?",
-        (password_hash, user_id),
-    )
-    conn.commit()
-    conn.close()
+    with closing(get_db_connection()) as conn, conn:
+        updated = conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ? AND password_hash = ?",
+            (password_hash, user["id"], user["password_hash"]),
+        )
+        if updated.rowcount != 1:
+            return False
+        conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user["id"],))
+        return True
 
 
 def hash_reset_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def delete_reset_tokens_for_user(user_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-
-
 def create_password_reset_token(user_id):
     token = secrets.token_urlsafe(32)
-    token_hash = hash_reset_token(token)
-    expires_at = get_current_time().timestamp() + 3600
-    created_at = get_current_time().isoformat(timespec="seconds")
+    now = get_current_time()
+    expires_at = now + RESET_LINK_LIFETIME
 
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
-    cur.execute(
-        """
-        INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        (user_id, token_hash, expires_at, created_at),
-    )
-    conn.commit()
-    conn.close()
+    with closing(get_db_connection()) as conn, conn:
+        conn.execute("BEGIN IMMEDIATE")
+        recently_requested = conn.execute(
+            "SELECT 1 FROM password_reset_tokens WHERE user_id = ? AND expires_at > ?",
+            (user_id, (expires_at - RESET_RESEND_INTERVAL).timestamp()),
+        ).fetchone()
+        if recently_requested:
+            return None
+        conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
+        conn.execute(
+            """
+            INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, hash_reset_token(token), expires_at.timestamp(), now.isoformat(timespec="seconds")),
+        )
     return token
 
 
-def get_password_reset_user_id(token):
-    token_hash = hash_reset_token(token)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT user_id, expires_at
-        FROM password_reset_tokens
-        WHERE token_hash = ?
-        """,
-        (token_hash,),
-    )
-    row = cur.fetchone()
-
-    if not row:
-        conn.close()
-        return None, "invalid"
-
-    user_id, expires_at = row
-    if float(expires_at) < get_current_time().timestamp():
-        cur.execute("DELETE FROM password_reset_tokens WHERE token_hash = ?", (token_hash,))
-        conn.commit()
-        conn.close()
-        return None, "expired"
-
-    conn.close()
-    return user_id, None
+def get_password_reset_user(token):
+    with closing(get_db_connection()) as conn:
+        return conn.execute(
+            """
+            SELECT users.id, users.email
+            FROM password_reset_tokens JOIN users ON users.id = password_reset_tokens.user_id
+            WHERE token_hash = ? AND expires_at > ?
+            """,
+            (hash_reset_token(token), get_current_time().timestamp()),
+        ).fetchone()
 
 
-def delete_password_reset_token(token):
-    token_hash = hash_reset_token(token)
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM password_reset_tokens WHERE token_hash = ?", (token_hash,))
-    conn.commit()
-    conn.close()
+def reset_user_password(user_id, token, password):
+    password_hash = generate_password_hash(password)
+    with closing(get_db_connection()) as conn, conn:
+        consumed = conn.execute(
+            "DELETE FROM password_reset_tokens WHERE user_id = ? AND token_hash = ? AND expires_at > ?",
+            (user_id, hash_reset_token(token), get_current_time().timestamp()),
+        )
+        if consumed.rowcount != 1:
+            return False
+        updated = conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (password_hash, user_id))
+        return updated.rowcount == 1
 
 
-def send_password_reset_email(user, token):
-    sender = os.environ.get("EMAIL_ADDRESS")
-    password = os.environ.get("EMAIL_PASSWORD")
-    if not sender or not password:
-        raise RuntimeError("Email is not configured. Set EMAIL_ADDRESS and EMAIL_PASSWORD.")
+def get_password_reset_origin():
+    configured_origin = os.environ.get("APP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL")
+    try:
+        parsed = urlsplit(configured_origin or request.host_url)
+        parsed.port  # Validate that an explicitly supplied port is usable.
+    except ValueError:
+        return None
+    if parsed.username or parsed.password or parsed.query or parsed.fragment or parsed.path not in ("", "/"):
+        return None
+    local = parsed.hostname in {"localhost", "127.0.0.1", "::1"} and not os.environ.get("RENDER")
+    if not parsed.hostname or not (configured_origin or local):
+        return None
+    if parsed.scheme != "https" and not (parsed.scheme == "http" and local):
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}"
 
-    reset_link = url_for("reset_password", token=token, _external=True)
-    message = EmailMessage()
-    message["Subject"] = "Reset your Personal AI OS password"
-    message["From"] = sender
-    message["To"] = user["email"]
-    message.set_content(
-        "Hello,\n\n"
+
+def send_password_reset_email(email, reset_link):
+    subject = "Reset your Personal AI OS password"
+    body = (
         "Use the link below to reset your Personal AI OS password. This link expires in 1 hour.\n\n"
         f"{reset_link}\n\n"
         "If you did not request this reset, you can ignore this email."
     )
+    api_key = os.environ.get("RESEND_API_KEY")
+    reset_sender = os.environ.get("PASSWORD_RESET_FROM")
+    if api_key and reset_sender:
+        email_request = Request(
+            "https://api.resend.com/emails",
+            data=json.dumps({"from": reset_sender, "to": [email], "subject": subject, "text": body}).encode(),
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(email_request, timeout=8):
+            return
 
-    with smtplib.SMTP("smtp.gmail.com", 587) as smtp:
-        smtp.starttls()
+    sender = os.environ.get("EMAIL_ADDRESS")
+    password = os.environ.get("EMAIL_PASSWORD")
+    message = EmailMessage()
+    message["Subject"] = subject
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(body)
+
+    with smtplib.SMTP("smtp.gmail.com", 587, timeout=8) as smtp:
+        smtp.starttls(context=ssl.create_default_context())
         smtp.login(sender, password)
         smtp.send_message(message)
 
 
 def get_current_user_id():
     if current_user.is_authenticated:
-        try:
-            return int(current_user.get_id())
-        except (TypeError, ValueError):
-            return None
-
-    try:
-        return int(session.get("user_id"))
-    except (TypeError, ValueError):
-        return None
+        return int(current_user.id)
+    return None
 
 
 def get_current_user_record():
@@ -1737,133 +1781,94 @@ def get_openai_reply(history, user_message, dashboard_context):
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    email = ""
+    remember = True
+    error = None
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
+        remember = request.form.get("remember") == "on"
 
         user = get_user_by_email(email)
         if user and check_password_hash(user["password_hash"], password):
-            session.clear()
-            sign_in_user(user, remember=True)
+            sign_in_user(user, remember=remember)
             return redirect(url_for("home"))
-
-        return safe_render_template("login.html", error="Invalid credentials")
-
-    if current_user.is_authenticated:
+        error = "The email or password is incorrect."
+    elif current_user.is_authenticated:
         return redirect(url_for("home"))
 
-    return safe_render_template("login.html", error=None)
+    return safe_render_template("login.html", email=email, remember=remember, error=error)
 
 
 @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
-    if request.method == "POST":
-        email = (request.form.get("email") or "").strip().lower()
-        user = get_user_by_email(email)
+    if request.method == "GET":
+        return safe_render_template("forgot_password.html", email="")
 
-        if not user:
-            return safe_render_template(
-                "forgot_password.html",
-                error="Email not found.",
-                success=None,
-                email=email,
-            )
-
-        token = create_password_reset_token(user["id"])
-        try:
-            send_password_reset_email(user, token)
-        except RuntimeError as exc:
-            delete_reset_tokens_for_user(user["id"])
-            return safe_render_template(
-                "forgot_password.html",
-                error=str(exc),
-                success=None,
-                email=email,
-            )
-        except Exception:
-            app.logger.exception("Password reset email failed for user id %s.", user["id"])
-            delete_reset_tokens_for_user(user["id"])
-            return safe_render_template(
-                "forgot_password.html",
-                error="Could not send reset email. Please try again later.",
-                success=None,
-                email=email,
-            )
-
+    email = (request.form.get("email") or "").strip().lower()
+    origin = get_password_reset_origin()
+    resend_configured = os.environ.get("RESEND_API_KEY") and os.environ.get("PASSWORD_RESET_FROM")
+    smtp_configured = os.environ.get("EMAIL_ADDRESS") and os.environ.get("EMAIL_PASSWORD")
+    if not origin or not (resend_configured or smtp_configured):
         return safe_render_template(
             "forgot_password.html",
-            error=None,
-            success="Password reset email sent. Please check your inbox.",
-            email="",
-        )
+            error="Password reset email is temporarily unavailable.",
+            email=email,
+        ), 503
 
-    return safe_render_template("forgot_password.html", error=None, success=None, email="")
+    user = get_user_by_email(email)
+    if user:
+        token = create_password_reset_token(user["id"])
+        if token:
+            reset_link = origin + url_for("reset_password", token=token)
+            try:
+                send_password_reset_email(user["email"], reset_link)
+            except (OSError, ValueError):
+                app.logger.exception("Password reset email failed for user id %s.", user["id"])
+
+    flash("If an account uses that email address, you’ll receive a reset link. Check your spam folder if it doesn’t arrive.")
+    return redirect(url_for("forgot_password"))
 
 
 @app.route("/reset-password/<token>", methods=["GET", "POST"])
 def reset_password(token):
-    user_id, token_error = get_password_reset_user_id(token)
-    if token_error:
-        message = "Expired token." if token_error == "expired" else "Invalid token."
+    user = get_password_reset_user(token)
+    if not user:
         return safe_render_template(
-            "reset_password.html",
-            error=message,
-            success=None,
-            token_valid=False,
-            token=token,
-        )
+            "auth_message.html",
+            title="Reset link unavailable",
+            message="This link has expired or has already been used.",
+            retry_reset=True,
+        ), 400
 
+    user_id, email = user
+    error = None
     if request.method == "POST":
         password = request.form.get("password") or ""
         confirm_password = request.form.get("confirm_password") or ""
-
-        if not password:
-            return safe_render_template(
-                "reset_password.html",
-                error="New password is required.",
-                success=None,
-                token_valid=True,
-                token=token,
-            )
-
         if len(password) < 6:
-            return safe_render_template(
-                "reset_password.html",
-                error="Password must be at least 6 characters long.",
-                success=None,
-                token_valid=True,
-                token=token,
-            )
+            error = "Use at least 6 characters."
+        elif password != confirm_password:
+            error = "The passwords do not match."
+        elif reset_user_password(user_id, token, password):
+            session.clear()
+            logout_user()
+            flash("Password updated. Sign in with your new password.")
+            return redirect(url_for("login"))
+        else:
+            return redirect(url_for("reset_password", token=token))
 
-        if password != confirm_password:
-            return safe_render_template(
-                "reset_password.html",
-                error="Password mismatch.",
-                success=None,
-                token_valid=True,
-                token=token,
-            )
-
-        update_user_password(user_id, password)
-        delete_password_reset_token(token)
-        flash("Password updated successfully. Please log in.")
-        return redirect(url_for("login"))
-
-    return safe_render_template(
-        "reset_password.html",
-        error=None,
-        success=None,
-        token_valid=True,
-        token=token,
-    )
+    return safe_render_template("reset_password.html", token=token, email=email, error=error)
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    remember = True
     if request.method == "POST":
         username = (request.form.get("username") or "").strip()
         email = (request.form.get("email") or "").strip().lower()
         password = request.form.get("password") or ""
+        remember = request.form.get("remember") == "on"
 
         try:
             user_id = create_user_account(username, email, password)
@@ -1871,22 +1876,47 @@ def register():
             return safe_render_template(
                 "register.html",
                 error=str(exc),
+                remember=remember,
                 form_data={"username": username, "email": email},
             )
 
-        session.clear()
         user_record = get_user_by_id(user_id)
         if user_record:
-            sign_in_user(user_record, remember=True)
+            sign_in_user(user_record, remember=remember)
         return redirect(url_for("home"))
 
     if current_user.is_authenticated:
         return redirect(url_for("home"))
 
-    return safe_render_template("register.html", error=None, form_data={"username": "", "email": ""})
+    return safe_render_template("register.html", remember=remember, form_data={"username": "", "email": ""})
 
 
-@app.route("/logout", methods=["GET"])
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    error = None
+    if request.method == "POST":
+        user = get_current_user_record()
+        current_password = request.form.get("current_password") or ""
+        password = request.form.get("new_password") or ""
+        confirmation = request.form.get("confirm_password") or ""
+        if not check_password_hash(user["password_hash"], current_password):
+            error = "The current password is incorrect."
+        elif len(password) < 6:
+            error = "Use at least 6 characters."
+        elif password != confirmation:
+            error = "The passwords do not match."
+        elif update_user_password(user, password):
+            session.clear()
+            logout_user()
+            flash("Password updated. Sign in with your new password.")
+            return redirect(url_for("login"))
+        else:
+            return redirect(url_for("login"))
+    return safe_render_template("change_password.html", error=error)
+
+
+@app.route("/logout", methods=["POST"])
 @login_required
 def logout():
     current_username = get_current_username() or "guest"
@@ -1897,7 +1927,7 @@ def logout():
         CHAT_SESSIONS.pop(f"{current_username}:{chat_session_id}", None)
         PENDING_AI_TASKS.pop(f"{current_username}:{chat_session_id}", None)
 
-    session.pop("user_id", None)
+    session.clear()
     logout_user()
     flash("Logged out successfully")
     return redirect(url_for("login"))

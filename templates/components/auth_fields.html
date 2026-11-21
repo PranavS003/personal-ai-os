@@ -1,0 +1,13 @@
+{% macro csrf() -%}
+    <input type="hidden" name="auth_form_token" value="{{ auth_form_token() }}">
+{%- endmacro %}
+
+{% macro password_field(name, label, autocomplete="new-password") %}
+    <div class="auth-field">
+        <label for="{{ name }}">{{ label }}</label>
+        <div class="auth-password">
+            <input type="password" name="{{ name }}" id="{{ name }}" autocomplete="{{ autocomplete }}"{% if autocomplete == "new-password" %} minlength="6"{% endif %} required>
+            <button type="button" data-password-toggle aria-controls="{{ name }}" aria-label="Show {{ label|lower }}" hidden>Show</button>
+        </div>
+    </div>
+{% endmacro %}
